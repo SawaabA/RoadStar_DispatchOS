@@ -179,3 +179,9 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+# RoadStar web application
+node_modules/
+dist/
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
