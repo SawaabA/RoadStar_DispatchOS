@@ -1,19 +1,20 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AlertTriangle, Box, ChevronRight, RotateCcw, Sparkles, Truck } from 'lucide-react'
 import { TrailerScene } from './TrailerScene'
-import { createPlan } from './planner'
+import { solvePlan } from './solver'
 import type { Load, PackedItem, Trailer } from './types'
 import './styles.css'
 
-const trailer: Trailer = { id:'DV001', lengthIn:636, widthIn:98, heightIn:102, capacityLbs:44500 }
+const trailer: Trailer = { id:'DV001', lengthIn:636, widthIn:98, heightIn:102, capacityLbs:44500, frontAxleLimitLbs:12000, rearAxleLimitLbs:34000, axleDistanceIn:480 }
 const initialLoads: Load[] = [
-  { id:'412572', origin:'Oshawa, ON', destination:'Whitby, ON', weightLbs:17070, pallets:17, stop:1, description:'Automotive components' },
-  { id:'412479', origin:'North York, ON', destination:'Milton, ON', weightLbs:3091, pallets:8, stop:2, description:'Building materials' },
+  { id:'412572', origin:'Oshawa, ON', destination:'Whitby, ON', weightLbs:17070, pallets:17, stop:1, description:'Automotive components', palletLengthIn:48, palletWidthIn:40, palletHeightIn:48, rotatable:true, stackable:false, bearingLimitLbs:0 },
+  { id:'412479', origin:'North York, ON', destination:'Milton, ON', weightLbs:3091, pallets:8, stop:2, description:'Building materials', palletLengthIn:48, palletWidthIn:40, palletHeightIn:48, rotatable:true, stackable:true, bearingLimitLbs:2500 },
 ]
 
 export default function App(){
   const [loads,setLoads]=useState(initialLoads), [activeStop,setActiveStop]=useState(0), [selected,setSelected]=useState<PackedItem|null>(null)
-  const plan=useMemo(()=>createPlan(loads,trailer),[loads])
+  const [plan,setPlan]=useState<ReturnType<typeof import('./planner').createPlan>>(()=>({items:[],unplanned:[],totalWeight:0,usedFloorArea:0,warnings:[],engine:'connecting'}))
+  useEffect(()=>{ let alive=true; solvePlan(loads,trailer).then(p=>alive&&setPlan(p)); return()=>{alive=false} },[loads])
   const weightPct=Math.round(plan.totalWeight/trailer.capacityLbs*100), floorPct=Math.round(plan.usedFloorArea/(trailer.lengthIn*trailer.widthIn)*100)
   const update=(idx:number,key:keyof Load,value:string)=>setLoads(ls=>ls.map((l,i)=>i===idx?{...l,[key]:key==='weightLbs'||key==='pallets'?Math.max(1,Number(value)):value}:l))
   return <main>
@@ -37,7 +38,7 @@ export default function App(){
         <div className="estimate"><AlertTriangle size={16}/><span><b>ESTIMATED GEOMETRY</b> Standard 48×40×48 in pallets generated from shipment totals.</span></div>
       </section>
       <aside className="panel right">
-        <div className="eyebrow">PLAN HEALTH</div><div className="score">{plan.unplanned.length?72:94}<small>/100</small></div><p className="good">READY FOR REVIEW</p>
+        <div className="eyebrow">PLAN HEALTH · {plan.engine?.toUpperCase()}</div><div className="score">{plan.unplanned.length?72:94}<small>/100</small></div><p className="good">READY FOR REVIEW</p>
         <div className="metric"><span>Weight</span><b>{plan.totalWeight.toLocaleString()} <small>/ {trailer.capacityLbs.toLocaleString()} lb</small></b><div><i style={{width:`${weightPct}%`}}/></div><em>{weightPct}%</em></div>
         <div className="metric"><span>Floor used</span><b>{floorPct}%</b><div><i style={{width:`${floorPct}%`}}/></div></div>
         <div className="metric-row"><span><Box/>Planned pallets<b>{plan.items.length}</b></span><span><AlertTriangle/>Unplanned<b>{plan.unplanned.length}</b></span></div>

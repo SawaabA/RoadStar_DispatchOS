@@ -28,5 +28,5 @@ export function createPlan(loads: Load[], trailer: Trailer): Plan {
   const usedFloorArea = items.reduce((s, p) => s + p.length * p.width, 0)
   const warnings = ['Pallet geometry and individual weights are estimated from shipment totals. Verify before operational use.']
   if (unplanned.length) warnings.push(`${unplanned.length} pallet${unplanned.length === 1 ? '' : 's'} could not be planned due to space or weight capacity.`)
-  return { items, unplanned, totalWeight, usedFloorArea, warnings }
+  return { items, unplanned, totalWeight, usedFloorArea, warnings, engine: 'browser-fallback' }
 }
