@@ -5,7 +5,6 @@ __pycache__/
 
 # C extensions
 *.so
-
 # Distribution / packaging
 .Python
 build/
@@ -16,6 +15,11 @@ eggs/
 .eggs/
 lib/
 lib64/
+!src/lib/
+!src/lib/**
+!src/shared/
+!src/shared/lib/
+!src/shared/lib/**
 parts/
 sdist/
 var/
@@ -185,5 +189,9 @@ dist/
 *.tsbuildinfo
 vite.config.js
 vite.config.d.ts
-server/.deps/
-server/out/
+services/loading-solver/.deps/
+services/loading-solver/out/
+.env
+.env.local
+.env.*.local
+.env.example

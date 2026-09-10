@@ -1,5 +1,5 @@
 import { createPlan } from './planner'
-import type { Load, Plan, Trailer } from './types'
+import type { Load, Plan, Trailer } from '../types'
 
 export async function solvePlan(loads: Load[], trailer: Trailer): Promise<Plan> {
   try {

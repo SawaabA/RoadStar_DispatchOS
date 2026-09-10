@@ -1,4 +1,4 @@
-import type { Load, PackedItem, Plan, Trailer } from './types'
+import type { Load, PackedItem, Plan, Trailer } from '../types'
 
 const colors = ['#4ee6a8', '#58a6ff', '#f8c35c', '#e77cff', '#ff735c']
 
