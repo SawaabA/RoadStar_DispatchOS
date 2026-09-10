@@ -1,4 +1,4 @@
 {
-  "compilerOptions": { "composite": true, "noEmit": true, "skipLibCheck": true, "module": "ESNext", "moduleResolution": "Bundler" },
+  "compilerOptions": { "composite": true, "noEmit": true, "skipLibCheck": true, "target": "ES2022", "lib": ["ES2022"], "module": "ESNext", "moduleResolution": "Bundler" },
   "include": ["vite.config.ts"]
 }

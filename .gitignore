@@ -194,5 +194,7 @@ services/loading-solver/out/
 .env
 .env.local
 .env.*.local
-.env.example
+!.env.example
+.qa-chrome*/
+qa-*.png
 supabase/.temp/
