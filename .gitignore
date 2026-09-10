@@ -195,3 +195,4 @@ services/loading-solver/out/
 .env.local
 .env.*.local
 .env.example
+supabase/.temp/
