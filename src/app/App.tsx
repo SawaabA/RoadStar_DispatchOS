@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { AlertTriangle, Box, ChevronRight, RotateCcw, Sparkles, Truck } from 'lucide-react'
-import { TrailerScene } from './TrailerScene'
-import { solvePlan } from './solver'
-import type { Load, PackedItem, Trailer } from './types'
+import { TrailerScene } from '../features/loading/components/TrailerScene'
+import { solvePlan } from '../features/loading/lib/solver'
+import type { Load, PackedItem, Trailer } from '../features/loading/types'
 import './styles.css'
 
 const trailer: Trailer = { id:'DV001', lengthIn:636, widthIn:98, heightIn:102, capacityLbs:44500, frontAxleLimitLbs:12000, rearAxleLimitLbs:34000, axleDistanceIn:480 }
@@ -13,7 +13,7 @@ const initialLoads: Load[] = [
 
 export default function App(){
   const [loads,setLoads]=useState(initialLoads), [activeStop,setActiveStop]=useState(0), [selected,setSelected]=useState<PackedItem|null>(null)
-  const [plan,setPlan]=useState<ReturnType<typeof import('./planner').createPlan>>(()=>({items:[],unplanned:[],totalWeight:0,usedFloorArea:0,warnings:[],engine:'connecting'}))
+  const [plan,setPlan]=useState<ReturnType<typeof import('../features/loading/lib/planner').createPlan>>(()=>({items:[],unplanned:[],totalWeight:0,usedFloorArea:0,warnings:[],engine:'connecting'}))
   useEffect(()=>{ let alive=true; solvePlan(loads,trailer).then(p=>alive&&setPlan(p)); return()=>{alive=false} },[loads])
   const weightPct=Math.round(plan.totalWeight/trailer.capacityLbs*100), floorPct=Math.round(plan.usedFloorArea/(trailer.lengthIn*trailer.widthIn)*100)
   const update=(idx:number,key:keyof Load,value:string)=>setLoads(ls=>ls.map((l,i)=>i===idx?{...l,[key]:key==='weightLbs'||key==='pallets'?Math.max(1,Number(value)):value}:l))

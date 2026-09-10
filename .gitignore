@@ -16,6 +16,8 @@ eggs/
 .eggs/
 lib/
 lib64/
+!src/lib/
+!src/lib/**
 parts/
 sdist/
 var/
@@ -185,5 +187,8 @@ dist/
 *.tsbuildinfo
 vite.config.js
 vite.config.d.ts
-server/.deps/
-server/out/
+services/loading-solver/.deps/
+services/loading-solver/out/
+.env
+.env.local
+.env.*.local

@@ -1,7 +1,7 @@
 import { Canvas } from '@react-three/fiber'
 import { ContactShadows, Edges, Html, OrbitControls } from '@react-three/drei'
 import { useState } from 'react'
-import type { PackedItem, Trailer } from './types'
+import type { PackedItem, Trailer } from '../types'
 
 const SCALE = 0.02
 function Pallet({ item, faded, onSelect }: { item: PackedItem; faded: boolean; onSelect: (i: PackedItem) => void }) {
