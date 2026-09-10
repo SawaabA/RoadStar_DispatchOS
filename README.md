@@ -1,31 +1,45 @@
-#  RoadStar DispatchOS
+# RoadStar DispatchOS
 
-test 1 sawaab 
-feature list so far 
+RoadStar DispatchOS is a unified Southern Ontario dispatch workspace. It combines manual dispatch, explainable fleet-wide planning, practical Canadian HOS checks, live track-and-trace, geofences, automated detention, a focused driver workflow, and stop-aware 3D trailer loading.
 
+## Run the application
 
+Requirements: Node.js 22+, Java 17+ for the xflp sidecar, and a Supabase project for cloud synchronization.
 
-## the loading dash 
-        It currently demonstrates the complete core flow:
-        - Multiple shipments in one trailer
-        - Pallet generation
-        - Real xflp optimization
-        - Weight, space, rotation, stacking, LIFO, and axle constraints
-        - Interactive Three.js visualization
-        - Stop-based colours and filtering
-        - Unplanned-item warnings
-        - Automatic browser fallback if xflp is offline
-        - RoadStar workbook sample data
+```powershell
+npm install
+Copy-Item .env.example .env.local
+npm run dev:full
+```
 
+Open `http://localhost:5173`. `npm run dev` runs the web app alone with browser fallbacks. `npm run dev:full` also starts the independent telemetry simulator and Java xflp solver.
 
+## Environment
 
-        It is not production-ready yet. Later phases should add:
-        - Multiple trailers and truck selection
-        - Many loads assigned across a fleet
-        - Editable pallet dimensions and weights
-        - Drag-and-drop manual placement
-        - Fragile, hazardous, refrigerated, and non-stackable rules
-        - Axle-load visualization and validation details
-        - Loading/unloading animation
-        - Saved plans and database integration
-        - Automatic import from RoadStar’s order data
+Only browser-safe Supabase values belong in `.env.local`:
+
+```text
+VITE_SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=YOUR_PUBLISHABLE_KEY
+```
+
+Never expose a Supabase secret or service-role key through a `VITE_` variable.
+
+## Database
+
+Migrations live in `supabase/migrations` and are forward-only. Apply them in timestamp order. The current P0 operations migration adds stops, trips, HOS clocks, detention, recommendations, organization-scoped write policies, realtime publication, and synchronized workspace snapshots.
+
+Signed-out visitors use a deterministic local demo. Selecting the user menu sends a Supabase magic link; authenticated dispatchers share their organization state through Supabase Realtime.
+
+## Commands
+
+```powershell
+npm run dev          # Vite web app
+npm run simulator    # independent SSE telemetry provider on :7071
+npm run solver       # xflp Java service on :7070
+npm run dev:full     # all three services
+npm test             # dispatch constraint tests
+npm run build        # type-check and production bundle
+```
+
+See [P0 implementation](docs/P0-implementation.md) for feature traceability, decisions, limitations, and source references.

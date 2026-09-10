@@ -5,16 +5,23 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:full": "concurrently -k -n SOLVER,WEB -c yellow,green \"npm:solver\" \"npm:dev\"",
+    "predev:full": "powershell -ExecutionPolicy Bypass -File scripts/free-dev-ports.ps1",
+    "dev:full": "concurrently -k -n SOLVER,SIM,WEB -c yellow,cyan,green \"npm:solver\" \"npm:simulator\" \"npm:dev\"",
     "solver": "powershell -ExecutionPolicy Bypass -File services/loading-solver/run.ps1",
+    "simulator": "node services/telematics-simulator/server.mjs",
     "build": "tsc -b && vite build",
+    "test": "vitest run",
     "preview": "vite preview"
   },
   "dependencies": {
     "@react-three/drei": "10.7.8",
     "@react-three/fiber": "9.7.0",
     "@supabase/supabase-js": "^2.116.0",
+    "@turf/boolean-point-in-polygon": "7.4.0",
+    "@turf/distance": "7.4.0",
+    "@turf/helpers": "7.4.0",
     "lucide-react": "^0.544.0",
+    "maplibre-gl": "6.9.0",
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "three": "^0.180.0"
@@ -26,6 +33,7 @@
     "@vitejs/plugin-react": "^5.0.2",
     "concurrently": "^9.2.1",
     "typescript": "^5.9.2",
-    "vite": "^7.1.5"
+    "vite": "^7.1.5",
+    "vitest": "5.0.0"
   }
 }

@@ -1,51 +1,1472 @@
-import { useEffect, useState } from 'react'
-import { AlertTriangle, Box, ChevronRight, RotateCcw, Sparkles, Truck } from 'lucide-react'
-import { TrailerScene } from '../features/loading/components/TrailerScene'
-import { solvePlan } from '../features/loading/lib/solver'
-import type { Load, PackedItem, Trailer } from '../features/loading/types'
-import './styles.css'
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import {
+  AlertTriangle,
+  ArrowRight,
+  Box,
+  Check,
+  ChevronDown,
+  CircleDollarSign,
+  Clock3,
+  Database,
+  Gauge,
+  Layers3,
+  LayoutDashboard,
+  ListFilter,
+  Map,
+  MapPin,
+  Menu,
+  Navigation,
+  PackageCheck,
+  Play,
+  Radio,
+  RefreshCw,
+  Route,
+  Search,
+  Settings2,
+  ShieldCheck,
+  Sparkles,
+  Timer,
+  Tractor,
+  Truck,
+  Users,
+  Warehouse,
+  X,
+} from "lucide-react";
+import { FleetMap } from "../features/map/components/FleetMap";
+import { useDispatchOperations } from "../features/dispatch/hooks/useDispatchOperations";
+import type {
+  DispatchCandidate,
+  DispatchLoad,
+  Driver,
+} from "../features/dispatch/types";
+import { isSupabaseConfigured } from "../shared/lib/supabase";
+import "./styles.css";
 
-const trailer: Trailer = { id:'DV001', lengthIn:636, widthIn:98, heightIn:102, capacityLbs:44500, frontAxleLimitLbs:12000, rearAxleLimitLbs:34000, axleDistanceIn:480 }
-const initialLoads: Load[] = [
-  { id:'412572', origin:'Oshawa, ON', destination:'Whitby, ON', weightLbs:17070, pallets:17, stop:1, description:'Automotive components', palletLengthIn:48, palletWidthIn:40, palletHeightIn:48, rotatable:true, stackable:false, bearingLimitLbs:0 },
-  { id:'412479', origin:'North York, ON', destination:'Milton, ON', weightLbs:3091, pallets:8, stop:2, description:'Building materials', palletLengthIn:48, palletWidthIn:40, palletHeightIn:48, rotatable:true, stackable:true, bearingLimitLbs:2500 },
-]
+type View =
+  | "overview"
+  | "dispatch"
+  | "loads"
+  | "fleet"
+  | "map"
+  | "detention"
+  | "driver"
+  | "loader";
+const fmtTime = (value: string) =>
+  new Intl.DateTimeFormat("en-CA", {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(value));
+const fmtMoney = (value: number) =>
+  new Intl.NumberFormat("en-CA", {
+    style: "currency",
+    currency: "CAD",
+    maximumFractionDigits: 0,
+  }).format(value);
+const statusLabel = (value: string) => value.replace("_", " ");
+const NAV: Array<{ id: View; label: string; icon: typeof LayoutDashboard }> = [
+  { id: "overview", label: "Command center", icon: LayoutDashboard },
+  { id: "dispatch", label: "Dispatch board", icon: Route },
+  { id: "loads", label: "Load board", icon: PackageCheck },
+  { id: "fleet", label: "Drivers & fleet", icon: Tractor },
+  { id: "map", label: "Live map", icon: Map },
+  { id: "detention", label: "Detention", icon: Timer },
+  { id: "driver", label: "Driver view", icon: Navigation },
+  { id: "loader", label: "3D load planner", icon: Layers3 },
+];
 
-export default function App(){
-  const [loads,setLoads]=useState(initialLoads), [activeStop,setActiveStop]=useState(0), [selected,setSelected]=useState<PackedItem|null>(null)
-  const [plan,setPlan]=useState<ReturnType<typeof import('../features/loading/lib/planner').createPlan>>(()=>({items:[],unplanned:[],totalWeight:0,usedFloorArea:0,warnings:[],engine:'connecting'}))
-  useEffect(()=>{ let alive=true; solvePlan(loads,trailer).then(p=>alive&&setPlan(p)); return()=>{alive=false} },[loads])
-  const weightPct=Math.round(plan.totalWeight/trailer.capacityLbs*100), floorPct=Math.round(plan.usedFloorArea/(trailer.lengthIn*trailer.widthIn)*100)
-  const update=(idx:number,key:keyof Load,value:string)=>setLoads(ls=>ls.map((l,i)=>i===idx?{...l,[key]:key==='weightLbs'||key==='pallets'?Math.max(1,Number(value)):value}:l))
-  return <main>
-    <header><div className="brand"><span className="mark"><Truck size={20}/></span><div>ROADSTAR<small>LOADSPACE</small></div></div><div className="status"><i/> LOCAL PLANNER READY</div></header>
-    <section className="workspace">
-      <aside className="panel left">
-        <div className="eyebrow">LOAD PLAN / RS-0912</div><h1>Trailer loading</h1><p className="muted">Build a safe, stop-aware loading proposal.</p>
-        <div className="trailer-card"><div><Truck/><span><b>{trailer.id}</b><small>53′ Dry Van</small></span></div><ChevronRight/></div>
-        <h3>SHIPMENTS <span>{loads.length}</span></h3>
-        {loads.map((l,i)=><div className="load" key={l.id}>
-          <div className="load-head"><span className={`dot c${i}`}/><b>#{l.id}</b><span>STOP {l.stop}</span></div>
-          <div className="route">{l.origin}<ChevronRight size={13}/>{l.destination}</div>
-          <div className="inputs"><label>PALLETS<input type="number" value={l.pallets} onChange={e=>update(i,'pallets',e.target.value)}/></label><label>TOTAL LB<input type="number" value={l.weightLbs} onChange={e=>update(i,'weightLbs',e.target.value)}/></label></div>
-        </div>)}
-        <button className="generate" onClick={()=>{setActiveStop(0);setSelected(null)}}><Sparkles size={17}/> Generate plan</button>
-      </aside>
-      <section className="stage">
-        <div className="stage-top"><div><span className="live-dot"/> INTERACTIVE LOAD PLAN</div><div className="view-hint">DRAG TO ORBIT · SCROLL TO ZOOM</div></div>
-        <TrailerScene trailer={trailer} items={plan.items} activeStop={activeStop} onSelect={setSelected}/>
-        <div className="stop-filter"><button className={activeStop===0?'active':''} onClick={()=>setActiveStop(0)}>All cargo</button>{loads.map((l,i)=><button key={l.id} className={activeStop===l.stop?'active':''} onClick={()=>setActiveStop(l.stop)}><i className={`dot c${i}`}/> Stop {l.stop}</button>)}</div>
-        <div className="estimate"><AlertTriangle size={16}/><span><b>ESTIMATED GEOMETRY</b> Standard 48×40×48 in pallets generated from shipment totals.</span></div>
+const LoaderWorkspace = lazy(() =>
+  import("../features/loading/components/LoaderWorkspace").then((module) => ({
+    default: module.LoaderWorkspace,
+  })),
+);
+
+function Badge({
+  children,
+  tone = "neutral",
+}: {
+  children: React.ReactNode;
+  tone?: "green" | "amber" | "red" | "blue" | "neutral";
+}) {
+  return <span className={`badge ${tone}`}>{children}</span>;
+}
+
+function Overview({
+  ops,
+  onNavigate,
+}: {
+  ops: ReturnType<typeof useDispatchOperations>;
+  onNavigate: (v: View) => void;
+}) {
+  const { state, metrics, simulationRunning, setSimulationRunning } = ops,
+    active = state.assignments.filter((a) => a.status !== "completed"),
+    urgent = state.loads.filter(
+      (l) => l.status === "unassigned" && l.priority !== "standard",
+    );
+  return (
+    <div className="page fade-in">
+      <div className="page-heading">
+        <div>
+          <p className="kicker">THURSDAY OPERATIONS · SOUTHERN ONTARIO</p>
+          <h1>Good morning, Dispatch</h1>
+          <p>Here’s what needs attention across the network.</p>
+        </div>
+        <div className="heading-actions">
+          <button
+            className="btn secondary"
+            onClick={() => setSimulationRunning(!simulationRunning)}
+          >
+            {simulationRunning ? (
+              <>
+                <Radio className="pulse" /> Live simulation
+              </>
+            ) : (
+              <>
+                <Play /> Start live demo
+              </>
+            )}
+          </button>
+          <button
+            className="btn primary"
+            onClick={() => onNavigate("dispatch")}
+          >
+            <Sparkles />
+            Plan my morning
+          </button>
+        </div>
+      </div>
+      <div className="metric-grid">
+        <article className="metric-card">
+          <span className="metric-icon teal">
+            <PackageCheck />
+          </span>
+          <div>
+            <small>OPEN LOADS</small>
+            <strong>{metrics.open}</strong>
+            <em>{urgent.length} high priority</em>
+          </div>
+        </article>
+        <article className="metric-card">
+          <span className="metric-icon blue">
+            <Truck />
+          </span>
+          <div>
+            <small>ACTIVE TRIPS</small>
+            <strong>{metrics.active}</strong>
+            <em>
+              {
+                state.assignments.filter((a) => a.status === "in_transit")
+                  .length
+              }{" "}
+              moving now
+            </em>
+          </div>
+        </article>
+        <article className="metric-card">
+          <span className="metric-icon violet">
+            <Users />
+          </span>
+          <div>
+            <small>AVAILABLE DRIVERS</small>
+            <strong>
+              {metrics.available}
+              <i> / {state.drivers.length}</i>
+            </strong>
+            <em>HOS verified</em>
+          </div>
+        </article>
+        <article className="metric-card">
+          <span className="metric-icon amber">
+            <CircleDollarSign />
+          </span>
+          <div>
+            <small>DETENTION CAPTURED</small>
+            <strong>{fmtMoney(metrics.detention)}</strong>
+            <em>Today’s evidence</em>
+          </div>
+        </article>
+      </div>
+      <div className="overview-grid">
+        <section className="surface map-card">
+          <div className="section-head">
+            <div>
+              <p className="kicker">LIVE OPERATIONS</p>
+              <h2>Fleet pulse</h2>
+            </div>
+            <button className="text-btn" onClick={() => onNavigate("map")}>
+              Open map <ArrowRight />
+            </button>
+          </div>
+          <div className="mini-map">
+            <FleetMap
+              trucks={state.trucks}
+              assignments={state.assignments}
+              loads={state.loads}
+              facilities={state.facilities}
+              satellite={false}
+            />
+          </div>
+        </section>
+        <section className="surface attention">
+          <div className="section-head">
+            <div>
+              <p className="kicker">ACTION REQUIRED</p>
+              <h2>Exceptions</h2>
+            </div>
+            <Badge tone="amber">3 open</Badge>
+          </div>
+          <button className="exception" onClick={() => onNavigate("dispatch")}>
+            <span className="danger-icon">
+              <AlertTriangle />
+            </span>
+            <div>
+              <b>No compatible trailer</b>
+              <p>
+                RS-4530 requires a flatbed; none appears in the active asset
+                master.
+              </p>
+            </div>
+            <ArrowRight />
+          </button>
+          <button className="exception" onClick={() => onNavigate("detention")}>
+            <span className="amber-icon">
+              <Timer />
+            </span>
+            <div>
+              <b>Detention now billable</b>
+              <p>Truck 67 has been at London Terminal for 2h 18m.</p>
+            </div>
+            <ArrowRight />
+          </button>
+          <button className="exception">
+            <span className="blue-icon">
+              <Clock3 />
+            </span>
+            <div>
+              <b>HOS margin tightening</b>
+              <p>Driver D-052 has 3h 06m driving remaining.</p>
+            </div>
+            <ArrowRight />
+          </button>
+        </section>
+      </div>
+      <section className="surface">
+        <div className="section-head">
+          <div>
+            <p className="kicker">CURRENT EXECUTION</p>
+            <h2>Active movements</h2>
+          </div>
+          <span className="live-label">
+            <i /> Updates every second
+          </span>
+        </div>
+        <div className="movement-list">
+          {active.map((a) => {
+            const load = state.loads.find((l) => l.id === a.loadId)!,
+              driver = state.drivers.find((d) => d.id === a.driverId)!,
+              truck = state.trucks.find((t) => t.id === a.truckId)!;
+            return (
+              <article className="movement" key={a.id}>
+                <span className="avatar">{driver.initials}</span>
+                <div className="movement-main">
+                  <div>
+                    <b>{load.origin}</b>
+                    <ArrowRight />
+                    <b>{load.destination}</b>
+                  </div>
+                  <p>
+                    {load.billNumber} · {driver.name} · Truck {truck.number}
+                  </p>
+                  <div className="progress">
+                    <i style={{ width: `${Math.max(4, a.progress * 100)}%` }} />
+                  </div>
+                </div>
+                <div className="movement-stat">
+                  <small>SPEED</small>
+                  <b>{a.speedKph} km/h</b>
+                </div>
+                <div className="movement-stat">
+                  <small>ETA</small>
+                  <b>{fmtTime(a.eta)}</b>
+                </div>
+                <Badge tone={a.status === "in_transit" ? "green" : "blue"}>
+                  {statusLabel(a.status)}
+                </Badge>
+              </article>
+            );
+          })}
+        </div>
       </section>
-      <aside className="panel right">
-        <div className="eyebrow">PLAN HEALTH · {plan.engine?.toUpperCase()}</div><div className="score">{plan.unplanned.length?72:94}<small>/100</small></div><p className="good">READY FOR REVIEW</p>
-        <div className="metric"><span>Weight</span><b>{plan.totalWeight.toLocaleString()} <small>/ {trailer.capacityLbs.toLocaleString()} lb</small></b><div><i style={{width:`${weightPct}%`}}/></div><em>{weightPct}%</em></div>
-        <div className="metric"><span>Floor used</span><b>{floorPct}%</b><div><i style={{width:`${floorPct}%`}}/></div></div>
-        <div className="metric-row"><span><Box/>Planned pallets<b>{plan.items.length}</b></span><span><AlertTriangle/>Unplanned<b>{plan.unplanned.length}</b></span></div>
-        <h3>VALIDATION</h3><div className="check">✓ Under trailer weight limit</div><div className="check">✓ Stop-aware rear unloading</div><div className="warn">! Dimensions require confirmation</div>
-        {selected&&<div className="selection"><button onClick={()=>setSelected(null)}>×</button><small>SELECTED PALLET</small><b>{selected.id}</b><p>{selected.destination}</p><span>{selected.weightLbs.toLocaleString()} lb · Stop {selected.stop}</span></div>}
-        <button className="reset" onClick={()=>setLoads(initialLoads)}><RotateCcw size={15}/> Reset demo</button>
+    </div>
+  );
+}
+
+function AssignmentModal({
+  load,
+  drivers,
+  onClose,
+  onAssign,
+  candidateFor,
+}: {
+  load: DispatchLoad;
+  drivers: Driver[];
+  onClose: () => void;
+  onAssign: (c: DispatchCandidate) => void;
+  candidateFor: (l: string, d: string) => DispatchCandidate | null;
+}) {
+  const candidates = drivers
+    .map((d) => candidateFor(load.id, d.id))
+    .filter(Boolean) as DispatchCandidate[];
+  return (
+    <div
+      className="modal-backdrop"
+      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <section className="modal assignment-modal">
+        <button className="close" onClick={onClose}>
+          <X />
+        </button>
+        <p className="kicker">MANUAL DISPATCH</p>
+        <h2>
+          {load.billNumber} · {load.origin} → {load.destination}
+        </h2>
+        <p className="modal-sub">
+          Choose a unit. DispatchOS checks equipment, capacity, pickup
+          feasibility, and HOS before assignment.
+        </p>
+        <div className="candidate-list">
+          {candidates
+            .sort(
+              (a, b) =>
+                Number(b.feasible) - Number(a.feasible) || b.score - a.score,
+            )
+            .map((c) => {
+              const d = drivers.find((x) => x.id === c.driverId)!;
+              return (
+                <article
+                  className={`candidate ${c.feasible ? "" : "blocked"}`}
+                  key={d.id}
+                >
+                  <span className="avatar">{d.initials}</span>
+                  <div className="candidate-copy">
+                    <div>
+                      <b>{d.name}</b>
+                      <Badge tone={c.feasible ? "green" : "red"}>
+                        {c.feasible ? "Feasible" : "Blocked"}
+                      </Badge>
+                    </div>
+                    <p>
+                      Truck {c.truckId.replace("T-", "")} · Trailer{" "}
+                      {c.trailerId} · {Math.round(c.deadheadKm)} km deadhead
+                    </p>
+                    <small>{c.explanation}</small>
+                  </div>
+                  <div className="candidate-score">
+                    <strong>{c.score}</strong>
+                    <small>MATCH</small>
+                  </div>
+                  <button
+                    disabled={!c.feasible}
+                    className="btn compact primary"
+                    onClick={() => onAssign(c)}
+                  >
+                    Assign
+                  </button>
+                </article>
+              );
+            })}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function PlanModal({ ops }: { ops: ReturnType<typeof useDispatchOperations> }) {
+  const { proposal, state, setProposal, applyPlan } = ops;
+  if (!proposal) return null;
+  return (
+    <div className="modal-backdrop">
+      <section className="modal plan-modal">
+        <button className="close" onClick={() => setProposal(null)}>
+          <X />
+        </button>
+        <div className="plan-title">
+          <span className="spark">
+            <Sparkles />
+          </span>
+          <div>
+            <p className="kicker">FLEET-WIDE PROPOSAL</p>
+            <h2>Morning plan ready</h2>
+            <p>
+              {proposal.candidates.length} assignments ·{" "}
+              {Math.round(proposal.projectedDeadheadKm)} km projected deadhead ·
+              nothing changes until you approve.
+            </p>
+          </div>
+        </div>
+        <div className="proposal-summary">
+          <span>
+            <Check /> {proposal.candidates.length} feasible
+          </span>
+          <span className={proposal.rejectedLoads.length ? "warn-text" : ""}>
+            <AlertTriangle /> {proposal.rejectedLoads.length} needs review
+          </span>
+          <span>
+            <Clock3 /> Generated {fmtTime(proposal.generatedAt)}
+          </span>
+        </div>
+        <div className="proposal-list">
+          {proposal.candidates.map((c) => {
+            const load = state.loads.find((l) => l.id === c.loadId)!,
+              driver = state.drivers.find((d) => d.id === c.driverId)!;
+            return (
+              <article key={c.loadId}>
+                <div className="proposal-route">
+                  <b>{load.billNumber}</b>
+                  <span>
+                    {load.origin}
+                    <ArrowRight />
+                    {load.destination}
+                  </span>
+                </div>
+                <div>
+                  <small>RECOMMENDED UNIT</small>
+                  <b>
+                    {driver.name} · Truck {c.truckId.replace("T-", "")}
+                  </b>
+                </div>
+                <div>
+                  <small>DEADHEAD</small>
+                  <b>{Math.round(c.deadheadKm)} km</b>
+                </div>
+                <div>
+                  <small>HOS AFTER</small>
+                  <b>{c.hosRemainingAfter.toFixed(1)} h</b>
+                </div>
+                <p>
+                  <Sparkles />
+                  {c.explanation}
+                </p>
+              </article>
+            );
+          })}
+          {proposal.rejectedLoads.map((item) => {
+            const load = state.loads.find((l) => l.id === item.loadId)!;
+            return (
+              <article className="rejected" key={item.loadId}>
+                <div className="proposal-route">
+                  <b>{load.billNumber}</b>
+                  <span>
+                    {load.origin}
+                    <ArrowRight />
+                    {load.destination}
+                  </span>
+                </div>
+                <div className="reject-reason">
+                  <AlertTriangle />
+                  <span>
+                    <b>Manual review required</b>
+                    <small>
+                      {item.reasons[0] || "No available feasible unit"}
+                    </small>
+                  </span>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+        <footer className="modal-footer">
+          <button className="btn secondary" onClick={() => setProposal(null)}>
+            Reject plan
+          </button>
+          <button className="btn primary" onClick={applyPlan}>
+            <Check />
+            Apply {proposal.candidates.length} assignments
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function DispatchBoard({
+  ops,
+}: {
+  ops: ReturnType<typeof useDispatchOperations>;
+}) {
+  const { state, generatePlan, unassign } = ops,
+    [selected, setSelected] = useState<DispatchLoad | null>(null),
+    [filter, setFilter] = useState("all"),
+    [query, setQuery] = useState("");
+  const open = state.loads.filter(
+      (l) =>
+        l.status === "unassigned" &&
+        (filter === "all" || l.priority === filter) &&
+        `${l.billNumber}${l.customer}${l.origin}${l.destination}`
+          .toLowerCase()
+          .includes(query.toLowerCase()),
+    ),
+    assigned = state.assignments.filter((a) => a.status !== "completed");
+  return (
+    <div className="page fade-in">
+      <div className="page-heading">
+        <div>
+          <p className="kicker">DISPATCH WORKSPACE</p>
+          <h1>Build today’s plan</h1>
+          <p>
+            Assign manually or generate a fleet-wide proposal. Every pairing is
+            checked before dispatch.
+          </p>
+        </div>
+        <button className="btn primary xl" onClick={generatePlan}>
+          <Sparkles />
+          Plan my morning <span>{open.length} loads</span>
+        </button>
+      </div>
+      <div className="dispatch-toolbar">
+        <div className="search">
+          <Search />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search loads, cities, customers…"
+          />
+        </div>
+        <button
+          className={`chip ${filter === "all" ? "active" : ""}`}
+          onClick={() => setFilter("all")}
+        >
+          All open{" "}
+          <b>{state.loads.filter((l) => l.status === "unassigned").length}</b>
+        </button>
+        <button
+          className={`chip ${filter === "critical" ? "active" : ""}`}
+          onClick={() => setFilter("critical")}
+        >
+          Critical
+        </button>
+        <button
+          className={`chip ${filter === "high" ? "active" : ""}`}
+          onClick={() => setFilter("high")}
+        >
+          High priority
+        </button>
+        <button className="icon-btn">
+          <Settings2 />
+        </button>
+      </div>
+      <div className="dispatch-grid">
+        <section className="board-column">
+          <div className="column-head">
+            <span>UNASSIGNED LOADS</span>
+            <Badge>{open.length}</Badge>
+          </div>
+          {open.map((load) => (
+            <article
+              className={`load-card priority-${load.priority}`}
+              key={load.id}
+            >
+              <div className="load-title">
+                <div>
+                  <b>{load.billNumber}</b>
+                  <Badge
+                    tone={
+                      load.priority === "critical"
+                        ? "red"
+                        : load.priority === "high"
+                          ? "amber"
+                          : "neutral"
+                    }
+                  >
+                    {load.priority}
+                  </Badge>
+                </div>
+                <strong>{fmtMoney(load.rate)}</strong>
+              </div>
+              <div className="route-line">
+                <span>
+                  <i />
+                  {load.origin}
+                  <small>
+                    {fmtTime(load.pickupStart)}–{fmtTime(load.pickupEnd)}
+                  </small>
+                </span>
+                <ArrowRight />
+                <span>
+                  <i />
+                  {load.destination}
+                  <small>Due {fmtTime(load.deliveryEnd)}</small>
+                </span>
+              </div>
+              <div className="load-meta">
+                <span>
+                  <Box />
+                  {load.pallets} pallets
+                </span>
+                <span>
+                  <Gauge />
+                  {load.weightLbs.toLocaleString()} lb
+                </span>
+                <span>
+                  <Truck />
+                  {load.equipment}
+                </span>
+              </div>
+              <button
+                className="assign-action"
+                onClick={() => setSelected(load)}
+              >
+                Find eligible unit <ArrowRight />
+              </button>
+            </article>
+          ))}
+        </section>
+        <section className="board-column planned">
+          <div className="column-head">
+            <span>ACTIVE PLAN</span>
+            <Badge tone="green">{assigned.length}</Badge>
+          </div>
+          {assigned.map((a) => {
+            const load = state.loads.find((l) => l.id === a.loadId)!,
+              driver = state.drivers.find((d) => d.id === a.driverId)!;
+            return (
+              <article className="assignment-card" key={a.id}>
+                <div className="assignment-top">
+                  <span className="avatar">{driver.initials}</span>
+                  <div>
+                    <b>{driver.name}</b>
+                    <p>
+                      Truck {a.truckId.replace("T-", "")} · {a.trailerId}
+                    </p>
+                  </div>
+                  <Badge tone={a.status === "in_transit" ? "green" : "blue"}>
+                    {statusLabel(a.status)}
+                  </Badge>
+                </div>
+                <div className="assignment-load">
+                  <b>{load.billNumber}</b>
+                  <span>
+                    {load.origin}
+                    <ArrowRight />
+                    {load.destination}
+                  </span>
+                </div>
+                <div className="assignment-foot">
+                  <span>
+                    <Clock3 /> ETA {fmtTime(a.eta)}
+                  </span>
+                  <button onClick={() => unassign(load.id)}>Unassign</button>
+                </div>
+              </article>
+            );
+          })}
+        </section>
+        <section className="board-column resources">
+          <div className="column-head">
+            <span>AVAILABLE UNITS</span>
+            <Badge>
+              {state.drivers.filter((d) => d.status === "available").length}
+            </Badge>
+          </div>
+          {state.drivers.map((d) => {
+            const trailer = state.trailers.find((t) => t.id === d.trailerId)!;
+            return (
+              <article className={`resource-card ${d.status}`} key={d.id}>
+                <div>
+                  <span className="avatar">{d.initials}</span>
+                  <div>
+                    <b>{d.name}</b>
+                    <p>
+                      {d.id} · Truck {d.truckId.replace("T-", "")}
+                    </p>
+                  </div>
+                  <i className="availability" />
+                </div>
+                <div className="resource-stats">
+                  <span>
+                    <small>LOCATION</small>
+                    {d.location}
+                  </span>
+                  <span>
+                    <small>DRIVING</small>
+                    <b className={d.drivingHoursRemaining < 4 ? "risk" : ""}>
+                      {d.drivingHoursRemaining.toFixed(1)} h
+                    </b>
+                  </span>
+                  <span>
+                    <small>EQUIPMENT</small>
+                    {trailer.type}
+                  </span>
+                </div>
+              </article>
+            );
+          })}
+        </section>
+      </div>
+      {selected && (
+        <AssignmentModal
+          load={selected}
+          drivers={state.drivers}
+          candidateFor={ops.candidateFor}
+          onClose={() => setSelected(null)}
+          onAssign={(c) => {
+            ops.assign(c);
+            setSelected(null);
+          }}
+        />
+      )}
+      <PlanModal ops={ops} />
+    </div>
+  );
+}
+
+function LoadsPage({ ops }: { ops: ReturnType<typeof useDispatchOperations> }) {
+  const [query, setQuery] = useState(""),
+    rows = ops.state.loads.filter((l) =>
+      `${l.billNumber}${l.customer}${l.origin}${l.destination}`
+        .toLowerCase()
+        .includes(query.toLowerCase()),
+    );
+  return (
+    <div className="page fade-in">
+      <div className="page-heading">
+        <div>
+          <p className="kicker">SYSTEM OF RECORD</p>
+          <h1>Load board</h1>
+          <p>
+            Every order, appointment, assignment, and execution state in one
+            view.
+          </p>
+        </div>
+        <button className="btn primary">+ New load</button>
+      </div>
+      <section className="surface table-surface">
+        <div className="table-toolbar">
+          <div className="search">
+            <Search />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search bill, customer, or city"
+            />
+          </div>
+          <button className="btn secondary">
+            <ListFilter />
+            Filters
+          </button>
+        </div>
+        <div className="data-table">
+          <div className="table-row table-head">
+            <span>LOAD</span>
+            <span>ROUTE</span>
+            <span>APPOINTMENT</span>
+            <span>FREIGHT</span>
+            <span>VALUE</span>
+            <span>STATUS</span>
+          </div>
+          {rows.map((l) => (
+            <div className="table-row" key={l.id}>
+              <span>
+                <b>{l.billNumber}</b>
+                <small>{l.customer}</small>
+              </span>
+              <span>
+                <b>{l.origin}</b>
+                <small>→ {l.destination}</small>
+              </span>
+              <span>
+                <b>
+                  {fmtTime(l.pickupStart)}–{fmtTime(l.pickupEnd)}
+                </b>
+                <small>Delivery {fmtTime(l.deliveryEnd)}</small>
+              </span>
+              <span>
+                <b>{l.weightLbs.toLocaleString()} lb</b>
+                <small>
+                  {l.pallets} pallets · {l.equipment}
+                </small>
+              </span>
+              <span>
+                <b>{fmtMoney(l.rate)}</b>
+                <small>CAD</small>
+              </span>
+              <span>
+                <Badge
+                  tone={
+                    l.status === "completed"
+                      ? "green"
+                      : l.status === "in_transit"
+                        ? "blue"
+                        : l.status === "unassigned"
+                          ? "amber"
+                          : "neutral"
+                  }
+                >
+                  {statusLabel(l.status)}
+                </Badge>
+              </span>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function FleetPage({ ops }: { ops: ReturnType<typeof useDispatchOperations> }) {
+  const { state } = ops;
+  return (
+    <div className="page fade-in">
+      <div className="page-heading">
+        <div>
+          <p className="kicker">CAPACITY & COMPLIANCE</p>
+          <h1>Drivers and fleet</h1>
+          <p>
+            See location, equipment pairing, duty clock, and availability
+            without changing systems.
+          </p>
+        </div>
+      </div>
+      <div className="fleet-cards">
+        {state.drivers.map((d) => {
+          const t = state.trailers.find((x) => x.id === d.trailerId)!;
+          return (
+            <article className="surface driver-card" key={d.id}>
+              <div className="driver-head">
+                <span className="avatar large">{d.initials}</span>
+                <div>
+                  <h3>{d.name}</h3>
+                  <p>
+                    {d.id} · Truck {d.truckId.replace("T-", "")} · {t.number}
+                  </p>
+                </div>
+                <Badge tone={d.status === "available" ? "green" : "blue"}>
+                  {d.status}
+                </Badge>
+              </div>
+              <div className="location-line">
+                <MapPin />
+                {d.location}
+                <small>
+                  {d.nextAvailable === "Now"
+                    ? "Available now"
+                    : `Available ${d.nextAvailable}`}
+                </small>
+              </div>
+              <div className="hos-grid">
+                <div>
+                  <small>DRIVING LEFT</small>
+                  <strong>{d.drivingHoursRemaining.toFixed(1)}h</strong>
+                  <i>
+                    <b
+                      style={{
+                        width: `${(d.drivingHoursRemaining / 13) * 100}%`,
+                      }}
+                    />
+                  </i>
+                </div>
+                <div>
+                  <small>ON-DUTY LEFT</small>
+                  <strong>{d.onDutyHoursRemaining.toFixed(1)}h</strong>
+                  <i>
+                    <b
+                      style={{
+                        width: `${(d.onDutyHoursRemaining / 14) * 100}%`,
+                      }}
+                    />
+                  </i>
+                </div>
+                <div>
+                  <small>CYCLE LEFT</small>
+                  <strong>{d.cycleHoursRemaining.toFixed(1)}h</strong>
+                  <i>
+                    <b
+                      style={{
+                        width: `${(d.cycleHoursRemaining / 70) * 100}%`,
+                      }}
+                    />
+                  </i>
+                </div>
+              </div>
+              <div className="equipment-row">
+                <span>
+                  <Truck /> Truck {d.truckId.replace("T-", "")}
+                </span>
+                <span>
+                  <Warehouse /> {t.type}
+                </span>
+                <span>
+                  <ShieldCheck /> Pre-trip clear
+                </span>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function MapPage({ ops }: { ops: ReturnType<typeof useDispatchOperations> }) {
+  const [sat, setSat] = useState(false),
+    [truck, setTruck] = useState<string>();
+  const selected = ops.state.trucks.find((t) => t.id === truck),
+    active = ops.state.assignments.find((a) => a.truckId === truck);
+  return (
+    <div className="map-page fade-in">
+      <div className="map-toolbar">
+        <div>
+          <p className="kicker">TRACK & TRACE</p>
+          <h1>Live fleet map</h1>
+        </div>
+        <div className="segmented">
+          <button
+            className={!sat ? "active" : ""}
+            onClick={() => setSat(false)}
+          >
+            Road
+          </button>
+          <button className={sat ? "active" : ""} onClick={() => setSat(true)}>
+            Satellite
+          </button>
+        </div>
+        <button
+          className={`btn ${ops.simulationRunning ? "live-btn" : "secondary"}`}
+          onClick={() => ops.setSimulationRunning(!ops.simulationRunning)}
+        >
+          {ops.simulationRunning ? (
+            <>
+              <Radio /> Live
+            </>
+          ) : (
+            <>
+              <Play /> Start simulator
+            </>
+          )}
+        </button>
+      </div>
+      <div className="full-map">
+        <FleetMap
+          trucks={ops.state.trucks}
+          assignments={ops.state.assignments}
+          loads={ops.state.loads}
+          facilities={ops.state.facilities}
+          satellite={sat}
+          selectedTruckId={truck}
+          onSelectTruck={setTruck}
+        />
+        {selected && (
+          <aside className="map-detail">
+            <button className="close" onClick={() => setTruck(undefined)}>
+              <X />
+            </button>
+            <p className="kicker">SELECTED ASSET</p>
+            <h2>Truck {selected.number}</h2>
+            <Badge tone={selected.status === "available" ? "green" : "blue"}>
+              {selected.status}
+            </Badge>
+            <div className="map-detail-grid">
+              <span>
+                <small>SPEED</small>
+                <b>{active?.speedKph || 0} km/h</b>
+              </span>
+              <span>
+                <small>ODOMETER</small>
+                <b>{Math.round(selected.odometerKm).toLocaleString()} km</b>
+              </span>
+              <span>
+                <small>DISTANCE</small>
+                <b>{Math.round(active?.distanceKm || 0)} km</b>
+              </span>
+              <span>
+                <small>ETA</small>
+                <b>{active ? fmtTime(active.eta) : "—"}</b>
+              </span>
+            </div>
+            {active && (
+              <>
+                <h3>ROUTE PROGRESS</h3>
+                <div className="progress big">
+                  <i style={{ width: `${active.progress * 100}%` }} />
+                </div>
+                <p>{Math.round(active.progress * 100)}% complete</p>
+              </>
+            )}
+          </aside>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DetentionPage({
+  ops,
+}: {
+  ops: ReturnType<typeof useDispatchOperations>;
+}) {
+  return (
+    <div className="page fade-in">
+      <div className="page-heading">
+        <div>
+          <p className="kicker">AUTOMATED REVENUE CAPTURE</p>
+          <h1>Detention desk</h1>
+          <p>
+            Geofence timestamps become auditable dwell records and billable
+            charges automatically.
+          </p>
+        </div>
+        <div className="detention-total">
+          <small>CAPTURED TODAY</small>
+          <b>{fmtMoney(ops.metrics.detention)}</b>
+        </div>
+      </div>
+      <div className="detention-grid">
+        {ops.state.visits.map((v) => {
+          const facility = ops.state.facilities.find(
+              (f) => f.id === v.facilityId,
+            )!,
+            truck = ops.state.trucks.find((t) => t.id === v.truckId)!,
+            billable = Math.max(0, v.dwellMinutes - facility.freeMinutes),
+            charge = (billable * facility.detentionRate) / 60;
+          return (
+            <article className="surface visit-card" key={v.id}>
+              <div className="visit-top">
+                <span className={`clock-ring ${billable ? "billing" : ""}`}>
+                  <Timer />
+                </span>
+                <div>
+                  <Badge tone={billable ? "amber" : "green"}>
+                    {v.departedAt
+                      ? "Departed"
+                      : billable
+                        ? "Billing now"
+                        : "Inside geofence"}
+                  </Badge>
+                  <h2>Truck {truck.number}</h2>
+                  <p>{facility.name}</p>
+                </div>
+                <strong>{fmtMoney(charge)}</strong>
+              </div>
+              <div className="dwell-track">
+                <i
+                  style={{
+                    width: `${Math.min(100, (v.dwellMinutes / 180) * 100)}%`,
+                  }}
+                />
+                <b style={{ left: `${(facility.freeMinutes / 180) * 100}%` }} />
+              </div>
+              <div className="visit-stats">
+                <span>
+                  <small>ARRIVED</small>
+                  {fmtTime(v.arrivedAt)}
+                </span>
+                <span>
+                  <small>DWELL</small>
+                  {Math.floor(v.dwellMinutes / 60)}h {v.dwellMinutes % 60}m
+                </span>
+                <span>
+                  <small>FREE TIME</small>
+                  {facility.freeMinutes} min
+                </span>
+                <span>
+                  <small>BILLABLE</small>
+                  {billable} min
+                </span>
+                <span>
+                  <small>RATE</small>
+                  {fmtMoney(facility.detentionRate)}/h
+                </span>
+              </div>
+              {billable > 0 && (
+                <div className="evidence">
+                  <ShieldCheck />
+                  <span>
+                    <b>Evidence package ready</b>
+                    <small>
+                      Arrival time, departure status, facility, and rate
+                      captured.
+                    </small>
+                  </span>
+                  <button>View record</button>
+                </div>
+              )}
+            </article>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function DriverPage({
+  ops,
+}: {
+  ops: ReturnType<typeof useDispatchOperations>;
+}) {
+  const assignment =
+      ops.state.assignments.find((a) => a.driverId === "D-131") ||
+      ops.state.assignments[0],
+    load = ops.state.loads.find((l) => l.id === assignment?.loadId),
+    driver = ops.state.drivers.find((d) => d.id === assignment?.driverId);
+  if (!assignment || !load || !driver) return null;
+  return (
+    <div className="driver-demo fade-in">
+      <div className="phone">
+        <header>
+          <div className="driver-brand">
+            <span className="brand-mark">
+              <Truck />
+            </span>
+            <b>
+              ROADSTAR<small>DRIVER</small>
+            </b>
+          </div>
+          <span className="online">
+            <i /> Online
+          </span>
+        </header>
+        <main>
+          <p className="kicker">TODAY’S ASSIGNMENT</p>
+          <div className="driver-greeting">
+            <h1>Hi, {driver.name.split(" ")[0]}</h1>
+            <p>Drive safe. Your next stop is ready.</p>
+          </div>
+          <article className="mobile-load">
+            <div>
+              <Badge tone="green">{statusLabel(assignment.status)}</Badge>
+              <b>{load.billNumber}</b>
+            </div>
+            <div className="mobile-route">
+              <span>
+                <i />
+                <small>PICKUP · {fmtTime(load.pickupStart)}</small>
+                <b>{load.origin}</b>
+              </span>
+              <em />
+              <span>
+                <i />
+                <small>DELIVER BY · {fmtTime(load.deliveryEnd)}</small>
+                <b>{load.destination}</b>
+              </span>
+            </div>
+            <div className="mobile-meta">
+              <span>
+                <Box />
+                <b>{load.pallets}</b>
+                <small>Pallets</small>
+              </span>
+              <span>
+                <Gauge />
+                <b>{(load.weightLbs / 1000).toFixed(1)}k</b>
+                <small>Pounds</small>
+              </span>
+              <span>
+                <Truck />
+                <b>{load.equipment}</b>
+                <small>Equipment</small>
+              </span>
+            </div>
+          </article>
+          <div className="driver-actions">
+            {assignment.status === "proposed" ||
+            assignment.status === "dispatched" ? (
+              <button
+                className="accept"
+                onClick={() =>
+                  ops.updateAssignmentStatus(assignment.id, "accepted")
+                }
+              >
+                <Check />
+                Accept load
+              </button>
+            ) : assignment.status === "accepted" ? (
+              <button
+                className="accept"
+                onClick={() => {
+                  ops.updateAssignmentStatus(assignment.id, "in_transit");
+                  ops.setSimulationRunning(true);
+                }}
+              >
+                <Navigation />
+                Start route
+              </button>
+            ) : (
+              <button className="accept">
+                <Navigation />
+                Open route
+              </button>
+            )}
+            <button>
+              <MapPin />
+              Stop details
+            </button>
+          </div>
+          <section className="mobile-hos">
+            <div>
+              <p className="kicker">HOURS OF SERVICE</p>
+              <Badge tone="green">Legal to drive</Badge>
+            </div>
+            <div>
+              <span>
+                <small>DRIVING</small>
+                <b>{driver.drivingHoursRemaining.toFixed(1)}h</b>
+                <i>
+                  <em
+                    style={{
+                      width: `${(driver.drivingHoursRemaining / 13) * 100}%`,
+                    }}
+                  />
+                </i>
+              </span>
+              <span>
+                <small>ON DUTY</small>
+                <b>{driver.onDutyHoursRemaining.toFixed(1)}h</b>
+                <i>
+                  <em
+                    style={{
+                      width: `${(driver.onDutyHoursRemaining / 14) * 100}%`,
+                    }}
+                  />
+                </i>
+              </span>
+            </div>
+          </section>
+        </main>
+      </div>
+      <aside className="driver-notes">
+        <p className="kicker">RESPONSIVE DRIVER WORKFLOW</p>
+        <h1>Dispatch reaches the cab instantly.</h1>
+        <p>
+          This focused interface lets a driver acknowledge the load, see
+          appointment and freight details, open the route, and monitor practical
+          HOS—without exposing the dispatcher’s full workspace.
+        </p>
+        <ul>
+          <li>
+            <Check />
+            Assignment acceptance synchronized
+          </li>
+          <li>
+            <Check />
+            Duty and route state visible
+          </li>
+          <li>
+            <Check />
+            Designed as an installable PWA path
+          </li>
+        </ul>
       </aside>
-    </section>
-  </main>
+    </div>
+  );
+}
+
+function AuthModal({
+  ops,
+  onClose,
+}: {
+  ops: ReturnType<typeof useDispatchOperations>;
+  onClose: () => void;
+}) {
+  const [email, setEmail] = useState("");
+  const [message, setMessage] = useState("");
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setMessage("Sending secure link…");
+    const error = await ops.sendMagicLink(email);
+    setMessage(error || "Check your inbox for the RoadStar sign-in link.");
+  };
+  return (
+    <div
+      className="modal-backdrop"
+      onMouseDown={(event) => event.target === event.currentTarget && onClose()}
+    >
+      <form className="modal auth-modal" onSubmit={submit}>
+        <button type="button" className="close" onClick={onClose}>
+          <X />
+        </button>
+        <span className="spark">
+          <Database />
+        </span>
+        <p className="kicker">SECURE CLOUD SYNC</p>
+        <h2>
+          {ops.userEmail ? "Dispatcher account" : "Connect your workspace"}
+        </h2>
+        {ops.userEmail ? (
+          <>
+            <p className="modal-sub">
+              Signed in as {ops.userEmail}. Operational changes synchronize
+              through Supabase Realtime.
+            </p>
+            <div className="sync-state">
+              <i className={ops.syncStatus} />
+              <span>
+                <b>
+                  {ops.syncStatus === "synced"
+                    ? "All changes saved"
+                    : `Sync status: ${ops.syncStatus}`}
+                </b>
+                <small>RoadStar organization workspace</small>
+              </span>
+            </div>
+            <button
+              type="button"
+              className="btn secondary full"
+              onClick={() => {
+                void ops.signOut();
+                onClose();
+              }}
+            >
+              Sign out
+            </button>
+          </>
+        ) : (
+          <>
+            <p className="modal-sub">
+              Enter your work email. Supabase will send a password-free sign-in
+              link; local demo mode remains available.
+            </p>
+            <label className="auth-field">
+              WORK EMAIL
+              <input
+                type="email"
+                required
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="dispatcher@roadstar.ca"
+              />
+            </label>
+            <button className="btn primary full" type="submit">
+              Email me a secure link
+            </button>
+            {message && <p className="auth-message">{message}</p>}
+          </>
+        )}
+      </form>
+    </div>
+  );
+}
+
+export default function App() {
+  const ops = useDispatchOperations(),
+    [view, setView] = useState<View>(() => {
+      const requested = window.location.hash.slice(1) as View;
+      return NAV.some((item) => item.id === requested) ? requested : "overview";
+    }),
+    [navOpen, setNavOpen] = useState(true),
+    [authOpen, setAuthOpen] = useState(false),
+    title = useMemo(
+      () => NAV.find((n) => n.id === view)?.label || "DispatchOS",
+      [view],
+    );
+  useEffect(() => {
+    window.history.replaceState(null, "", `#${view}`);
+  }, [view]);
+  return (
+    <div className={`app-shell ${navOpen ? "" : "nav-collapsed"}`}>
+      <aside className="sidebar">
+        <div className="brand">
+          <span className="brand-mark">
+            <Truck />
+          </span>
+          <b>
+            ROADSTAR<small>DISPATCHOS</small>
+          </b>
+        </div>
+        <nav>
+          {NAV.map((item) => (
+            <button
+              key={item.id}
+              className={view === item.id ? "active" : ""}
+              onClick={() => setView(item.id)}
+              title={item.label}
+            >
+              <item.icon />
+              <span>{item.label}</span>
+              {item.id === "dispatch" && <i>{ops.metrics.open}</i>}
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-foot">
+          <div className="connection">
+            <Database />
+            <span>
+              <b>
+                {ops.userEmail
+                  ? "Cloud workspace"
+                  : isSupabaseConfigured
+                    ? "Supabase ready"
+                    : "Demo data mode"}
+              </b>
+              <small>
+                {ops.userEmail
+                  ? ops.syncStatus
+                  : isSupabaseConfigured
+                    ? "Sign in to sync"
+                    : "Configure .env to connect"}
+              </small>
+            </span>
+            <i />
+          </div>
+          <button onClick={ops.reset}>
+            <RefreshCw />
+            <span>Reset demo</span>
+          </button>
+        </div>
+      </aside>
+      <main className="app-main">
+        <header className="topbar">
+          <button className="menu-btn" onClick={() => setNavOpen(!navOpen)}>
+            <Menu />
+          </button>
+          <div className="crumb">
+            Operations <span>/</span> <b>{title}</b>
+          </div>
+          <div className="topbar-right">
+            <div className="global-search">
+              <Search />
+              <span>Search anything</span>
+              <kbd>Ctrl K</kbd>
+            </div>
+            <button className="alert-button">
+              <AlertTriangle />
+              <i>3</i>
+            </button>
+            <button className="profile" onClick={() => setAuthOpen(true)}>
+              <span>
+                {ops.userEmail ? ops.userEmail.slice(0, 2).toUpperCase() : "SD"}
+              </span>
+              <div>
+                <b>{ops.userEmail?.split("@")[0] || "Demo Dispatcher"}</b>
+                <small>
+                  {ops.userEmail ? "Cloud synchronized" : "Local demo session"}
+                </small>
+              </div>
+              <ChevronDown />
+            </button>
+          </div>
+        </header>
+        <div className="view-container">
+          {view === "overview" && <Overview ops={ops} onNavigate={setView} />}{" "}
+          {view === "dispatch" && <DispatchBoard ops={ops} />}{" "}
+          {view === "loads" && <LoadsPage ops={ops} />}{" "}
+          {view === "fleet" && <FleetPage ops={ops} />}{" "}
+          {view === "map" && <MapPage ops={ops} />}{" "}
+          {view === "detention" && <DetentionPage ops={ops} />}{" "}
+          {view === "driver" && <DriverPage ops={ops} />}{" "}
+          {view === "loader" && (
+            <Suspense
+              fallback={
+                <div className="module-loading">
+                  <Layers3 />
+                  <b>Loading 3D planner…</b>
+                </div>
+              }
+            >
+              <LoaderWorkspace />
+            </Suspense>
+          )}
+        </div>
+      </main>
+      {authOpen && <AuthModal ops={ops} onClose={() => setAuthOpen(false)} />}
+    </div>
+  );
 }
