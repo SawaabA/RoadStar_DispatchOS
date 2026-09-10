@@ -5,7 +5,6 @@ __pycache__/
 
 # C extensions
 *.so
-.env.example
 # Distribution / packaging
 .Python
 build/
@@ -18,6 +17,9 @@ lib/
 lib64/
 !src/lib/
 !src/lib/**
+!src/shared/
+!src/shared/lib/
+!src/shared/lib/**
 parts/
 sdist/
 var/
@@ -192,3 +194,4 @@ services/loading-solver/out/
 .env
 .env.local
 .env.*.local
+.env.example
