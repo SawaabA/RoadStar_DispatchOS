@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import distance from "@turf/distance";
-import { point } from "@turf/helpers";
 import { createDemoState } from "../data/demoData";
 import { buildMorningPlan, evaluateCandidate } from "../lib/optimizer";
+import { assignCandidate, unassignLoad } from "../lib/stateTransitions";
+import { isDispatchState } from "../lib/stateValidation";
+import { updateGeofenceVisits } from "../lib/geofencing";
 import type {
   Assignment,
   DispatchCandidate,
@@ -16,7 +17,9 @@ const STORAGE_KEY = "roadstar-dispatch-state-v2";
 const loadInitialState = (): DispatchState => {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    return stored ? (JSON.parse(stored) as DispatchState) : createDemoState();
+    if (!stored) return createDemoState();
+    const parsed: unknown = JSON.parse(stored);
+    return isDispatchState(parsed) ? parsed : createDemoState();
   } catch {
     return createDemoState();
   }
@@ -33,12 +36,14 @@ export function useDispatchOperations() {
   const stateRef = useRef(state);
   const organizationId = useRef<number | null>(null);
   const syncReady = useRef(false);
-  const externalSimulator = useRef(false);
+  const externalTelemetryAt = useRef(new Map<string, number>());
+  const lastSyncedState = useRef<string | null>(null);
   stateRef.current = state;
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  }, [state]);
+    if (!userEmail && organizationId.current === null)
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }, [state, userEmail]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -53,13 +58,17 @@ export function useDispatchOperations() {
 
   useEffect(() => {
     if (!supabase || !userEmail) {
+      const leavingCloudWorkspace = organizationId.current !== null;
       organizationId.current = null;
       syncReady.current = false;
+      lastSyncedState.current = null;
       setSyncStatus("local");
+      if (leavingCloudWorkspace) setState(createDemoState());
       return;
     }
     const client = supabase;
     let active = true;
+    let channel: ReturnType<typeof client.channel> | null = null;
     setSyncStatus("connecting");
     const connect = async () => {
       const { data: membership, error: membershipError } = await client
@@ -84,40 +93,73 @@ export function useDispatchOperations() {
         setSyncStatus("error");
         return;
       }
-      if (snapshot?.state) setState(snapshot.state as DispatchState);
-      else
-        await client
+      if (snapshot?.state) {
+        if (!isDispatchState(snapshot.state)) {
+          setSyncStatus("error");
+          return;
+        }
+        lastSyncedState.current = JSON.stringify(snapshot.state);
+        setState(snapshot.state);
+      } else {
+        const { error: insertError } = await client
           .from("dispatch_snapshots")
           .insert({ organization_id: orgId, state: stateRef.current });
+        if (insertError) {
+          setSyncStatus("error");
+          return;
+        }
+        lastSyncedState.current = JSON.stringify(stateRef.current);
+      }
+      if (!active) return;
       syncReady.current = true;
-      setSyncStatus("synced");
+      channel = client
+        .channel(`roadstar-dispatch-state-${orgId}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "dispatch_snapshots",
+            filter: `organization_id=eq.${orgId}`,
+          },
+          (payload) => {
+            const row = payload.new as {
+              organization_id?: number;
+              state?: DispatchState;
+            };
+            if (
+              !isDispatchState(row.state) ||
+              !active ||
+              Number(row.organization_id) !== orgId
+            )
+              return;
+            const serialized = JSON.stringify(row.state);
+            lastSyncedState.current = serialized;
+            if (serialized !== JSON.stringify(stateRef.current))
+              setState(row.state);
+          },
+        )
+        .subscribe((status) => {
+          if (status === "SUBSCRIBED") setSyncStatus("synced");
+          if (status === "CHANNEL_ERROR" || status === "TIMED_OUT")
+            setSyncStatus("error");
+        });
     };
     void connect();
-    const channel = client
-      .channel("roadstar-dispatch-state")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "dispatch_snapshots" },
-        (payload) => {
-          const next = (payload.new as { state?: DispatchState }).state;
-          if (next && active) setState(next);
-        },
-      )
-      .subscribe((status) => {
-        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT")
-          setSyncStatus("error");
-      });
     return () => {
       active = false;
       syncReady.current = false;
-      void client.removeChannel(channel);
+      if (channel) void client.removeChannel(channel);
     };
   }, [userEmail]);
 
   useEffect(() => {
     if (!supabase || !syncReady.current || !organizationId.current) return;
+    const serialized = JSON.stringify(state);
+    if (serialized === lastSyncedState.current) return;
     const client = supabase;
     const timer = window.setTimeout(async () => {
+      setSyncStatus("connecting");
       const { data } = await client.auth.getUser();
       const { error } = await client.from("dispatch_snapshots").upsert({
         organization_id: organizationId.current,
@@ -125,7 +167,11 @@ export function useDispatchOperations() {
         updated_by: data.user?.id,
         updated_at: new Date().toISOString(),
       });
-      setSyncStatus(error ? "error" : "synced");
+      if (error) setSyncStatus("error");
+      else {
+        lastSyncedState.current = serialized;
+        setSyncStatus("synced");
+      }
     }, 600);
     return () => window.clearTimeout(timer);
   }, [state]);
@@ -137,8 +183,9 @@ export function useDispatchOperations() {
       const trailer = state.trailers.find(
         (item) => item.id === driver?.trailerId,
       );
+      const truck = state.trucks.find((item) => item.id === driver?.truckId);
       return load && driver && trailer
-        ? evaluateCandidate(load, driver, trailer)
+        ? evaluateCandidate(load, driver, trailer, truck)
         : null;
     },
     [state],
@@ -150,97 +197,19 @@ export function useDispatchOperations() {
       status: Assignment["status"] = "dispatched",
     ) => {
       if (!candidate.feasible) return false;
-      setState((current) => {
-        const load = current.loads.find(
-          (item) => item.id === candidate.loadId,
-        )!;
-        const driver = current.drivers.find(
-          (item) => item.id === candidate.driverId,
-        )!;
-        const assignment: Assignment = {
-          id: `A-${load.billNumber.replace("RS-", "")}`,
-          loadId: load.id,
-          driverId: driver.id,
-          truckId: candidate.truckId,
-          trailerId: candidate.trailerId,
-          status,
-          assignedAt: new Date().toISOString(),
-          progress: 0,
-          currentPoint: driver.point,
-          breadcrumbs: [driver.point],
-          speedKph: 0,
-          distanceKm: 0,
-          eta: new Date(
-            Date.now() + candidate.projectedHours * 3600000,
-          ).toISOString(),
-        };
-        return {
-          ...current,
-          loads: current.loads.map((item) =>
-            item.id === load.id ? { ...item, status: "assigned" } : item,
-          ),
-          drivers: current.drivers.map((item) =>
-            item.id === driver.id ? { ...item, status: "assigned" } : item,
-          ),
-          trucks: current.trucks.map((item) =>
-            item.id === candidate.truckId
-              ? { ...item, status: "assigned" }
-              : item,
-          ),
-          trailers: current.trailers.map((item) =>
-            item.id === candidate.trailerId
-              ? { ...item, status: "assigned" }
-              : item,
-          ),
-          assignments: [
-            ...current.assignments.filter((item) => item.loadId !== load.id),
-            assignment,
-          ],
-        };
-      });
+      setState((current) => assignCandidate(current, candidate, status));
       return true;
     },
     [],
   );
 
   const unassign = useCallback(
-    (loadId: string) =>
-      setState((current) => {
-        const assignment = current.assignments.find(
-          (item) => item.loadId === loadId,
-        );
-        if (!assignment) return current;
-        return {
-          ...current,
-          loads: current.loads.map((item) =>
-            item.id === loadId ? { ...item, status: "unassigned" } : item,
-          ),
-          drivers: current.drivers.map((item) =>
-            item.id === assignment.driverId
-              ? { ...item, status: "available" }
-              : item,
-          ),
-          trucks: current.trucks.map((item) =>
-            item.id === assignment.truckId
-              ? { ...item, status: "available" }
-              : item,
-          ),
-          trailers: current.trailers.map((item) =>
-            item.id === assignment.trailerId
-              ? { ...item, status: "available" }
-              : item,
-          ),
-          assignments: current.assignments.filter(
-            (item) => item.id !== assignment.id,
-          ),
-        };
-      }),
+    (loadId: string) => setState((current) => unassignLoad(current, loadId)),
     [],
   );
 
   const generatePlan = useCallback(
-    () =>
-      setProposal(buildMorningPlan(state.loads, state.drivers, state.trailers)),
+    () => setProposal(buildMorningPlan(state.loads, state.drivers, state.trailers, state.trucks)),
     [state],
   );
   const applyPlan = useCallback(() => {
@@ -286,65 +255,49 @@ export function useDispatchOperations() {
 
   useEffect(() => {
     if (!simulationRunning) {
-      externalSimulator.current = false;
+      externalTelemetryAt.current.clear();
       return;
     }
     const stream = new EventSource("/api/telemetry/events");
-    stream.onopen = () => {
-      externalSimulator.current = true;
-    };
-    stream.onerror = () => {
-      externalSimulator.current = false;
-    };
     stream.onmessage = (message) => {
-      const telemetry = JSON.parse(message.data) as {
+      let telemetry: {
         truckId: string;
         point: { lat: number; lng: number };
         progress: number;
         speedKph: number;
         distanceKm: number;
       };
+      try {
+        telemetry = JSON.parse(message.data) as typeof telemetry;
+      } catch {
+        return;
+      }
+      if (
+        typeof telemetry.truckId !== "string" ||
+        !Number.isFinite(telemetry.point?.lat) ||
+        !Number.isFinite(telemetry.point?.lng) ||
+        !Number.isFinite(telemetry.progress) ||
+        !Number.isFinite(telemetry.speedKph) ||
+        !Number.isFinite(telemetry.distanceKm)
+      )
+        return;
+      externalTelemetryAt.current.set(telemetry.truckId, Date.now());
       setState((current) => {
-        const assignment = current.assignments.find(
-          (item) =>
-            item.truckId === telemetry.truckId && item.status !== "completed",
-        );
+        const assignment = current.assignments.find((item) => item.truckId === telemetry.truckId && item.status === "in_transit");
         if (!assignment) return current;
         const nextStatus: Assignment["status"] =
           telemetry.progress >= 1 ? "completed" : "in_transit";
         let visits = current.visits.map((visit) =>
-          visit.departedAt
+          visit.departedAt || visit.truckId !== telemetry.truckId
             ? visit
             : { ...visit, dwellMinutes: visit.dwellMinutes + 2 },
         );
-        for (const facility of current.facilities) {
-          const inside =
-            distance(
-              point([telemetry.point.lng, telemetry.point.lat]),
-              point([facility.point.lng, facility.point.lat]),
-              { units: "kilometers" },
-            ) <= facility.radiusKm;
-          const open = visits.find(
-            (visit) =>
-              visit.truckId === telemetry.truckId &&
-              visit.facilityId === facility.id &&
-              !visit.departedAt,
-          );
-          if (inside && !open)
-            visits.push({
-              id: `V-${Date.now()}-${facility.id}`,
-              truckId: telemetry.truckId,
-              facilityId: facility.id,
-              arrivedAt: new Date().toISOString(),
-              dwellMinutes: 0,
-            });
-          if (!inside && open)
-            visits = visits.map((visit) =>
-              visit.id === open.id
-                ? { ...visit, departedAt: new Date().toISOString() }
-                : visit,
-            );
-        }
+        visits = updateGeofenceVisits(
+          visits,
+          current.facilities,
+          telemetry.truckId,
+          telemetry.point,
+        );
         return {
           ...current,
           visits,
@@ -401,14 +354,21 @@ export function useDispatchOperations() {
                     0,
                     driver.cycleHoursRemaining - 2 / 60,
                   ),
+                  status: nextStatus === "completed" ? "available" : "assigned",
+                  nextAvailable: nextStatus === "completed" ? "Now" : driver.nextAvailable,
                 }
               : driver,
+          ),
+          trailers: current.trailers.map((trailer) =>
+            trailer.id === assignment.trailerId && nextStatus === "completed"
+              ? { ...trailer, status: "available" }
+              : trailer,
           ),
         };
       });
     };
     return () => {
-      externalSimulator.current = false;
+      externalTelemetryAt.current.clear();
       stream.close();
     };
   }, [simulationRunning]);
@@ -418,18 +378,20 @@ export function useDispatchOperations() {
     const timer = window.setInterval(
       () =>
         setState((current) => {
-          if (externalSimulator.current) return current;
           let visits = [...current.visits];
+          const fallbackTruckIds = new Set<string>();
           const assignments = current.assignments.map((assignment) => {
+            const externalIsFresh = Date.now() - (externalTelemetryAt.current.get(assignment.truckId) || 0) < 2500;
+            if (externalIsFresh) return assignment;
             if (
-              !["accepted", "in_transit", "dispatched", "proposed"].includes(
-                assignment.status,
-              )
+              assignment.status !== "in_transit"
             )
               return assignment;
+            fallbackTruckIds.add(assignment.truckId);
             const load = current.loads.find(
               (item) => item.id === assignment.loadId,
-            )!;
+            );
+            if (!load) return assignment;
             const progress = Math.min(1, assignment.progress + 0.012);
             const start = load.originPoint,
               end = load.destinationPoint;
@@ -447,34 +409,12 @@ export function useDispatchOperations() {
               status === "completed"
                 ? 0
                 : 76 + Math.round(Math.sin(progress * 20) * 14);
-            for (const facility of current.facilities) {
-              const inside =
-                distance(
-                  point([currentPoint.lng, currentPoint.lat]),
-                  point([facility.point.lng, facility.point.lat]),
-                  { units: "kilometers" },
-                ) <= facility.radiusKm;
-              const open = visits.find(
-                (v) =>
-                  v.truckId === assignment.truckId &&
-                  v.facilityId === facility.id &&
-                  !v.departedAt,
-              );
-              if (inside && !open)
-                visits.push({
-                  id: `V-${Date.now()}-${facility.id}`,
-                  truckId: assignment.truckId,
-                  facilityId: facility.id,
-                  arrivedAt: new Date().toISOString(),
-                  dwellMinutes: 0,
-                });
-              if (!inside && open)
-                visits = visits.map((v) =>
-                  v.id === open.id
-                    ? { ...v, departedAt: new Date().toISOString() }
-                    : v,
-                );
-            }
+            visits = updateGeofenceVisits(
+              visits,
+              current.facilities,
+              assignment.truckId,
+              currentPoint,
+            );
             return {
               ...assignment,
               progress,
@@ -492,7 +432,9 @@ export function useDispatchOperations() {
             };
           });
           visits = visits.map((v) =>
-            v.departedAt ? v : { ...v, dwellMinutes: v.dwellMinutes + 2 },
+            v.departedAt || !fallbackTruckIds.has(v.truckId)
+              ? v
+              : { ...v, dwellMinutes: v.dwellMinutes + 2 },
           );
           const completed = new Set(
             assignments
@@ -516,24 +458,27 @@ export function useDispatchOperations() {
               const active = assignments.find(
                 (a) => a.driverId === driver.id && a.status === "in_transit",
               );
-              return active
-                ? {
-                    ...driver,
-                    point: active.currentPoint,
-                    dutyStatus: "driving",
-                    drivingHoursRemaining: Math.max(
-                      0,
-                      driver.drivingHoursRemaining - 2 / 60,
-                    ),
-                    onDutyHoursRemaining: Math.max(
-                      0,
-                      driver.onDutyHoursRemaining - 2 / 60,
-                    ),
-                    cycleHoursRemaining: Math.max(
-                      0,
-                      driver.cycleHoursRemaining - 2 / 60,
-                    ),
-                  }
+              const finished = assignments.find((a) => a.driverId === driver.id && a.status === "completed");
+              if (active)
+                return {
+                  ...driver,
+                  point: active.currentPoint,
+                  dutyStatus: "driving",
+                  drivingHoursRemaining: Math.max(
+                    0,
+                    driver.drivingHoursRemaining - 2 / 60,
+                  ),
+                  onDutyHoursRemaining: Math.max(
+                    0,
+                    driver.onDutyHoursRemaining - 2 / 60,
+                  ),
+                  cycleHoursRemaining: Math.max(
+                    0,
+                    driver.cycleHoursRemaining - 2 / 60,
+                  ),
+                };
+              return finished
+                ? { ...driver, status: "available", dutyStatus: "on_duty", nextAvailable: "Now" }
                 : driver;
             }),
             trucks: current.trucks.map((truck) => {
@@ -546,7 +491,24 @@ export function useDispatchOperations() {
                     point: active.currentPoint,
                     odometerKm: truck.odometerKm + active.speedKph / 360,
                   }
-                : truck;
+                : assignments.some((a) => a.truckId === truck.id && a.status === "completed")
+                  ? { ...truck, status: "available" }
+                  : truck;
+            }),
+            trailers: current.trailers.map((trailer) => {
+              const active = assignments.some(
+                (assignment) =>
+                  assignment.trailerId === trailer.id &&
+                  assignment.status !== "completed",
+              );
+              if (active) return trailer;
+              return assignments.some(
+                (assignment) =>
+                  assignment.trailerId === trailer.id &&
+                  assignment.status === "completed",
+              )
+                ? { ...trailer, status: "available" }
+                : trailer;
             }),
           };
         }),
@@ -559,6 +521,7 @@ export function useDispatchOperations() {
     setState(createDemoState());
     setProposal(null);
     setSimulationRunning(false);
+    lastSyncedState.current = null;
   }, []);
   const sendMagicLink = useCallback(async (email: string) => {
     if (!supabase) return "Supabase is not configured.";

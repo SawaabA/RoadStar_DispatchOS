@@ -29,7 +29,7 @@ Never expose a Supabase secret or service-role key through a `VITE_` variable.
 
 Migrations live in `supabase/migrations` and are forward-only. Apply them in timestamp order. The current P0 operations migration adds stops, trips, HOS clocks, detention, recommendations, organization-scoped write policies, realtime publication, and synchronized workspace snapshots.
 
-Signed-out visitors use a deterministic local demo. Selecting the user menu sends a Supabase magic link; authenticated dispatchers share their organization state through Supabase Realtime.
+Signed-out visitors use a deterministic local demo. Selecting the user menu sends a Supabase magic link; authenticated dispatchers with an explicitly provisioned `organization_members` record share their organization state through Supabase Realtime. Account creation does not grant organization access automatically.
 
 ## Commands
 
@@ -39,6 +39,7 @@ npm run simulator    # independent SSE telemetry provider on :7071
 npm run solver       # xflp Java service on :7070
 npm run dev:full     # all three services
 npm test             # dispatch constraint tests
+npm run test:e2e     # Chrome workflow and accessibility tests
 npm run build        # type-check and production bundle
 ```
 

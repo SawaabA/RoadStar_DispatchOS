@@ -20,6 +20,8 @@ lib64/
 !src/shared/
 !src/shared/lib/
 !src/shared/lib/**
+!src/**/lib/
+!src/**/lib/**
 parts/
 sdist/
 var/
@@ -198,3 +200,6 @@ services/loading-solver/out/
 .qa-chrome*/
 qa-*.png
 supabase/.temp/
+test-results/
+playwright-report/
+blob-report/

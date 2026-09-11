@@ -60,6 +60,9 @@ public final class LoaderServer {
         solver.getParameter().setLifoImportance(1);
         solver.getParameter().setMaxNbrOfContainer(1);
         Trailer t = request.trailer;
+        if (t.id == null || t.id.isBlank() || t.lengthIn <= 0 || t.widthIn <= 0 || t.heightIn <= 0 || t.capacityLbs <= 0) {
+            throw new IllegalArgumentException("Trailer dimensions and capacity must be positive");
+        }
         var container = solver.addContainer().setContainerType(t.id).setLength(t.lengthIn).setWidth(t.widthIn).setHeight(t.heightIn).setMaxWeight(t.capacityLbs);
         if (t.frontAxleLimitLbs > 0 && t.rearAxleLimitLbs > 0 && t.axleDistanceIn > 0) {
             container.setFirstPermissibleAxleLoad(t.frontAxleLimitLbs);
@@ -68,7 +71,10 @@ public final class LoaderServer {
         }
         Map<String, Load> byItem = new HashMap<>();
         for (Load load : request.loads) {
-            if (load.pallets <= 0) continue;
+            if (load == null || load.id == null || load.id.isBlank() || load.pallets <= 0 || load.weightLbs <= 0 ||
+                load.stop <= 0 || load.palletLengthIn <= 0 || load.palletWidthIn <= 0 || load.palletHeightIn <= 0) {
+                throw new IllegalArgumentException("Every load requires an id, positive pallet count, weight, stop, and pallet dimensions");
+            }
             float weight = load.weightLbs / load.pallets;
             for (int i=1; i<=load.pallets; i++) {
                 String id = load.id + "-P" + String.format("%02d", i);
