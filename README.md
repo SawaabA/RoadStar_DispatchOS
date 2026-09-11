@@ -46,3 +46,4 @@ npm run build        # type-check and production bundle
 ```
 
 See [P0 implementation](docs/P0-implementation.md) for feature traceability, decisions, limitations, and source references.
+See [P1 implementation](docs/P1-implementation.md) for the in-flight P1 capabilities, their status against the spec, and current limitations.
