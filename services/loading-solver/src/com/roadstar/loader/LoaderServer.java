@@ -106,7 +106,9 @@ public final class LoaderServer {
     private static Item toItem(LPPackageEvent event, Load load) {
         String[] colors = {"#4ee6a8", "#58a6ff", "#f8c35c", "#e77cff", "#ff735c"};
         int stop = load == null ? 0 : load.stop;
-        return new Item(event.id(), load == null ? "unknown" : load.id, event.x(), event.y(), event.z(),
+        // xflp reports X across container width and Y along container length.
+        // RoadStar's shared contract uses X for trailer length and Y for width.
+        return new Item(event.id(), load == null ? "unknown" : load.id, event.y(), event.x(), event.z(),
             event.l(), event.w(), event.h(), event.weight(), stop, load == null ? "Unknown" : load.destination,
             colors[Math.floorMod(stop - 1, colors.length)], true, event.isRotatedPosition(), event.isInvalid());
     }

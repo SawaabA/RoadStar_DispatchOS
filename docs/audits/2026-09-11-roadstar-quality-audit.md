@@ -109,12 +109,12 @@
 | Field | Detail |
 |---|---|
 | Feature / role | 3D trailer loading; planner user |
-| Impact | Zero pallets could appear successful; entered pallet dimensions were ignored; oversized/tall freight could be placed outside the trailer; rotation was ignored. |
+| Impact | Zero pallets could appear successful; entered pallet dimensions were ignored; oversized/tall freight could be placed outside the trailer; rotation was ignored; xflp width/length coordinates rendered on the opposite scene axes. |
 | Reproduction | Enter zero pallets, custom dimensions, a pallet taller/wider than the trailer, or a pallet that only fits after rotation. |
 | Expected / actual | Expected validation or honest unplanned output; actual fallback could show a plausible but invalid plan. |
 | Evidence | `planner.test.ts`, Java 400 contract check, and browser invalid-input journey. |
 | Root cause | Hard-coded fallback geometry and incomplete bounds checks. |
-| Resolution | Share contract validation, use shipment dimensions, honor rotation, enforce length/width/height/weight, and expose warnings/unplanned items. |
+| Resolution | Share contract validation, use shipment dimensions, honor rotation, enforce length/width/height/weight, normalize xflp coordinates into the RoadStar axis contract, and expose warnings/unplanned items. |
 | Status | **Fixed and verified.** |
 
 ### RSQA-009 — S2 — malformed persisted/telemetry data could crash views
@@ -239,3 +239,4 @@
 7. Product limitations remain: routes are presentation geometry rather than road-snapped routing, practical HOS is not a certified ELD, and estimated pallet geometry must be verified operationally.
 
 The audit did **not** apply a remote migration, create users, change live data, expose environment values, or deploy the application.
+a
