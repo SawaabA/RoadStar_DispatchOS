@@ -1,6 +1,13 @@
 import distance from '@turf/distance'
 import { point } from '@turf/helpers'
-import type { DispatchCandidate, DispatchLoad, Driver, PlanProposal, TrailerAsset, TruckAsset } from '../types'
+import type { DispatchCandidate, DispatchLoad, Driver, OptimizationWeights, PlanProposal, TrailerAsset, TruckAsset } from '../types'
+
+export const DEFAULT_OPTIMIZATION_WEIGHTS: OptimizationWeights = {
+  deadhead: 40,
+  onTime: 30,
+  hosBuffer: 20,
+  futurePosition: 10,
+}
 
 const kmBetween = (a: {lat:number;lng:number}, b: {lat:number;lng:number}) => distance(point([a.lng,a.lat]), point([b.lng,b.lat]), { units:'kilometers' })
 const driveHours = (km: number) => km / 82
@@ -11,6 +18,8 @@ export function evaluateCandidate(
   trailer: TrailerAsset,
   truck?: TruckAsset,
   now = Date.now(),
+  weights: OptimizationWeights = DEFAULT_OPTIMIZATION_WEIGHTS,
+  futurePositionScore = 50,
 ): DispatchCandidate {
   const reasons: DispatchCandidate['reasons'] = []
   const deadheadKm = kmBetween(driver.point, load.originPoint)
@@ -27,21 +36,42 @@ export function evaluateCandidate(
   const pickupClose = new Date(load.pickupEnd).getTime()
   if (!Number.isFinite(pickupClose) || now + minutesToPickup*60000 > pickupClose) reasons.push({code:'pickup',label:'Cannot reach pickup before window closes'})
   const hosRemainingAfter = Math.max(0, Math.min(driver.drivingHoursRemaining-driving, driver.onDutyHoursRemaining-projectedHours, driver.cycleHoursRemaining-projectedHours))
-  const score = Math.max(0, Math.round(100 - deadheadKm*.32 - projectedHours*2.2 + hosRemainingAfter*2 + (load.priority==='critical'?8:load.priority==='high'?4:0)))
+  const pickupSlackMinutes = Number.isFinite(pickupClose)
+    ? (pickupClose - (now + minutesToPickup * 60000)) / 60000
+    : 0
+  const scoreBreakdown = {
+    deadhead: Math.max(0, Math.min(100, 100 - deadheadKm * 1.15)),
+    onTime: Math.max(0, Math.min(100, 55 + pickupSlackMinutes * 0.75)),
+    hosBuffer: Math.max(0, Math.min(100, (hosRemainingAfter / 8) * 100)),
+    futurePosition: Math.max(0, Math.min(100, futurePositionScore)),
+  }
+  const weightTotal = Math.max(1, weights.deadhead + weights.onTime + weights.hosBuffer + weights.futurePosition)
+  const weightedScore =
+    scoreBreakdown.deadhead * weights.deadhead +
+    scoreBreakdown.onTime * weights.onTime +
+    scoreBreakdown.hosBuffer * weights.hosBuffer +
+    scoreBreakdown.futurePosition * weights.futurePosition
+  const priorityBoost = load.priority==='critical' ? 8 : load.priority==='high' ? 4 : 0
+  const score = Math.max(0, Math.min(100, Math.round(weightedScore / weightTotal + priorityBoost)))
   const feasible = reasons.length === 0
   const explanation = feasible
     ? `${driver.name} is ${Math.round(deadheadKm)} km from pickup with compatible ${trailer.type.toLowerCase()} equipment and ${hosRemainingAfter.toFixed(1)} h projected HOS margin.`
     : reasons.map(reason=>reason.label).join(' · ')
-  return {loadId:load.id,driverId:driver.id,truckId:driver.truckId,trailerId:trailer.id,feasible,reasons,deadheadKm,tripKm,pickupEtaMinutes:minutesToPickup,projectedHours,hosRemainingAfter,score,explanation}
+  return {loadId:load.id,driverId:driver.id,truckId:driver.truckId,trailerId:trailer.id,feasible,reasons,deadheadKm,tripKm,pickupEtaMinutes:minutesToPickup,projectedHours,hosRemainingAfter,score,scoreBreakdown,explanation}
 }
 
-export function buildMorningPlan(loads: DispatchLoad[], drivers: Driver[], trailers: TrailerAsset[], trucks: TruckAsset[] = []): PlanProposal {
+export function buildMorningPlan(loads: DispatchLoad[], drivers: Driver[], trailers: TrailerAsset[], trucks: TruckAsset[] = [], weights: OptimizationWeights = DEFAULT_OPTIMIZATION_WEIGHTS): PlanProposal {
   const openLoads = loads.filter(load=>load.status==='unassigned').sort((a,b)=>({critical:0,high:1,standard:2}[a.priority]-({critical:0,high:1,standard:2}[b.priority])))
   const available = drivers.filter(driver=>driver.status==='available')
   const matrices = openLoads.map(load=>available.flatMap(driver=>{
     const trailer = trailers.find(t=>t.id===driver.trailerId)
     if (!trailer) return []
-    return [evaluateCandidate(load,driver,trailer,trucks.find(t=>t.id===driver.truckId))]
+    const futureOptions = loads.filter(other=>other.id!==load.id && other.status==='unassigned')
+    const nearestFutureKm = futureOptions.length
+      ? Math.min(...futureOptions.map(other=>kmBetween(load.destinationPoint, other.originPoint)))
+      : 80
+    const futureScore = Math.max(0, 100-nearestFutureKm)
+    return [evaluateCandidate(load,driver,trailer,trucks.find(t=>t.id===driver.truckId),Date.now(),weights,futureScore)]
   }).sort((a,b)=>b.score-a.score))
   let best: DispatchCandidate[] = []
   let bestScore = -Infinity
