@@ -5,13 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "predev:full": "powershell -ExecutionPolicy Bypass -File scripts/free-dev-ports.ps1",
-    "dev:full": "concurrently -k -n SOLVER,SIM,WEB -c yellow,cyan,green \"npm:solver\" \"npm:simulator\" \"npm:dev\"",
-    "solver": "powershell -ExecutionPolicy Bypass -File services/loading-solver/run.ps1",
+    "predev:full": "node scripts/free-dev-ports.mjs",
+    "dev:full": "concurrently --kill-others-on-fail -n SOLVER,SIM,WEB -c yellow,cyan,green \"npm:solver\" \"npm:simulator\" \"npm:dev\"",
+    "solver": "node services/loading-solver/run.mjs",
     "simulator": "node services/telematics-simulator/server.mjs",
     "build": "tsc -b && vite build",
     "test": "vitest run",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "solver:build": "node services/loading-solver/build.mjs"
   },
   "dependencies": {
     "@react-three/drei": "10.7.8",
