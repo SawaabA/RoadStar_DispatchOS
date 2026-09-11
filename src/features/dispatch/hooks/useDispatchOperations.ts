@@ -138,7 +138,7 @@ export function useDispatchOperations() {
         (item) => item.id === driver?.trailerId,
       );
       return load && driver && trailer
-        ? evaluateCandidate(load, driver, trailer)
+        ? evaluateCandidate(load, driver, trailer, { trucks: state.trucks, assignments: state.assignments })
         : null;
     },
     [state],
@@ -153,10 +153,19 @@ export function useDispatchOperations() {
       setState((current) => {
         const load = current.loads.find(
           (item) => item.id === candidate.loadId,
-        )!;
+        );
         const driver = current.drivers.find(
           (item) => item.id === candidate.driverId,
-        )!;
+        );
+        const trailer = current.trailers.find(
+          (item) => item.id === candidate.trailerId,
+        );
+        if (!load || !driver || !trailer || driver.truckId !== candidate.truckId) return current;
+        const refreshed = evaluateCandidate(load, driver, trailer, {
+          trucks: current.trucks,
+          assignments: current.assignments,
+        });
+        if (!refreshed.feasible) return current;
         const assignment: Assignment = {
           id: `A-${load.billNumber.replace("RS-", "")}`,
           loadId: load.id,
@@ -171,7 +180,7 @@ export function useDispatchOperations() {
           speedKph: 0,
           distanceKm: 0,
           eta: new Date(
-            Date.now() + candidate.projectedHours * 3600000,
+            Date.now() + refreshed.projectedHours * 3600000,
           ).toISOString(),
         };
         return {
@@ -240,7 +249,7 @@ export function useDispatchOperations() {
 
   const generatePlan = useCallback(
     () =>
-      setProposal(buildMorningPlan(state.loads, state.drivers, state.trailers)),
+      setProposal(buildMorningPlan(state.loads, state.drivers, state.trailers, { trucks: state.trucks, assignments: state.assignments })),
     [state],
   );
   const applyPlan = useCallback(() => {

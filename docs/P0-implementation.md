@@ -37,6 +37,10 @@ The dispatcher domain, feasibility rules, batch proposal workflow, simulator con
 
 ## Operational limitations
 
+- Dispatch estimates use great-circle distance multiplied by 1.2, 60 km/h average travel, 30 minutes at each service stop, and a 30-minute reserve on each available HOS clock. Pickup waiting consumes on-duty and cycle time. Delivery feasibility checks completion after service. These are configurable code assumptions, not road-routing results or a complete regulatory HOS model.
+- The morning planner maximizes the number of covered loads, then summed priority (critical 3, high 2, standard 1), then minimizes deadhead. It reserves each driver, truck, trailer, and load at most once, including existing active assignments supplied by the application. A deterministic 50,000-node search budget returns the best proposal found; larger fleets are not guaranteed globally optimal. Driver availability must be `Now` or a dated timestamp. No rest-related clock replenishment is inferred.
+- Manual and batch assignments are rechecked against current state when applied. The UI's HOS-after figure is the smallest remaining driving, on-duty, or cycle margin. The existing model does not supply elapsed-shift or rest-history data, so those constraints cannot yet be validated.
+
 - Map routes currently use presentation geometry between known points; production road-snapped geometry should come from a contracted routing provider such as Mapbox, GraphHopper, or OSRM.
 - The batch planner is deterministic and fleet-wide but is not yet the planned OR-Tools service. OR-Tools is the appropriate next solver when scale, time windows, and look-ahead chains exceed the in-browser search space; Google’s reference model supports vehicle-routing time windows.^5
 - HOS is a practical dispatch feasibility aid, not a certified ELD replacement.
