@@ -391,4 +391,5 @@ export const createDemoState = (): DispatchState => ({
       dwellMinutes: 125,
     },
   ],
+  incidents: [],
 });

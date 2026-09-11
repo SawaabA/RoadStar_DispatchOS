@@ -13,10 +13,11 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
-!src/features/dispatch/lib/
-!src/features/dispatch/lib/**
+# Scoped to the repo root: these are Python virtualenv dirs, and an unanchored
+# "lib/" silently ignores every nested source directory named lib (it already
+# swallowed src/features/dispatch/lib).
+/lib/
+/lib64/
 !src/lib/
 !src/lib/**
 !src/shared/
