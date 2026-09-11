@@ -1,0 +1,8 @@
+interface:
+  display_name: "RoadStar Quality Auditor"
+  short_description: "Audit and improve RoadStar end to end"
+  brand_color: "#F59E0B"
+  default_prompt: "Use $roadstar-quality-auditor to audit every RoadStar feature, fix confirmed defects, verify usability, and produce an evidence-backed report."
+
+policy:
+  allow_implicit_invocation: true
