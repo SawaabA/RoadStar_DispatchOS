@@ -24,6 +24,7 @@ P0 reproduced the dispatcher’s manual morning and automated the assignment dec
 | KPI surface | Brief, workflow speed and financial value^2 | Open loads, active trips, available drivers, detention revenue, speed, ETA, distance and route progress | Production build and visual QA | Shipped |
 | ROI baseline | Blueprint, “demonstrate baseline versus simulated optimized plan”^1 | Historical replay over the supplied workbook, comparing recorded empty distance against the planner’s projection | Deterministic replay over `data/raw` | Planned |
 | Historical replay | Blueprint, prove value with supplied data^1 | Workbook importer normalising orders, dispatch legs, drivers, trucks and trailers | Row counts reconciled against the workbook | Planned |
+| Simulator event generator | Brief, event generator^2; blueprint, inject traffic, dock and HOS events^1 | Seeded generator producing route delays, lane closures, dock waits and duty-cycle shifts, streamed on the existing SSE contract, with an inject endpoint for demo control; the web app records each as a `RoadIncident` and raises a `route` exception | Determinism check across seeds; injected closure observed end to end | Shipped |
 | Integration adapters | Blueprint, provider contract architecture^1 | Telemetry reaches the app over SSE with an automatic browser fallback; the loading solver falls back to the in-browser planner | `/api/telemetry/health`, solver fallback path | In progress |
 | Ontario 511 integration | Blueprint, Southern Ontario intelligence^1 | Incident overlay feeding ETA and delivery-risk recalculation | — | Deferred |
 
@@ -67,7 +68,8 @@ The capability is now genuinely implemented. Detection reproduces all three cond
 - Optimizer weights remain compiled constants. The blueprint asks for them to live in configuration and to be surfaced to the dispatcher as an adjustable optimization goal; until that lands, a judge’s question about trade-offs cannot be answered by changing the weighting live.^1
 - The optimizer scores each load in isolation. The downstream and utilization terms of the blueprint’s objective are absent, so a pairing that strands a unit after delivery is not penalised.^1
 - Driver HOS carries three clocks. The brief additionally specifies a 16-hour elapsed window, which is not represented.^2
-- The telemetry simulator interpolates movement but generates no events. Automatic re-plan cannot be demonstrated until route delays, dock waits and duty-cycle shifts can be injected, which the brief lists as required simulator functionality.^2
+- The simulator's browser fallback provider generates no events; disruptions require the independent Node service to be running.
+- Road incidents are surfaced to the dispatcher but do not yet recompute ETA or delivery risk. Consuming them is the first half of automatic re-plan.
 - Exceptions are derived on every state change and are not persisted, so there is no exception history or dismissal state; a condition that resolves and recurs presents as a new entry.
 - No P1 capability writes to the relational schema. Dispatch state synchronises as a single snapshot document, so the `recommendations` and `detention_events` tables created by the P0 migration remain unwritten.
 

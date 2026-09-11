@@ -9,6 +9,7 @@ import type {
   DispatchCandidate,
   DispatchState,
   PlanProposal,
+  RoadIncident,
 } from "../types";
 import { supabase } from "../../../shared/lib/supabase";
 
@@ -304,13 +305,28 @@ export function useDispatchOperations() {
         progress: number;
         speedKph: number;
         distanceKm: number;
+        event?: RoadIncident | null;
       };
       setState((current) => {
+        const others = (current.incidents ?? []).filter(
+          (incident) => incident.truckId !== telemetry.truckId,
+        );
+        const incidents = telemetry.event
+          ? [...others, telemetry.event]
+          : others;
+        // telemetry.event is parsed fresh each tick, so identity has to be
+        // compared by id; otherwise an idle truck rewrites state every second.
+        const incidentsUnchanged =
+          incidents.length === (current.incidents ?? []).length &&
+          incidents.every(
+            (item, index) => item.id === current.incidents?.[index]?.id,
+          );
         const assignment = current.assignments.find(
           (item) =>
             item.truckId === telemetry.truckId && item.status !== "completed",
         );
-        if (!assignment) return current;
+        if (!assignment)
+          return incidentsUnchanged ? current : { ...current, incidents };
         const nextStatus: Assignment["status"] =
           telemetry.progress >= 1 ? "completed" : "in_transit";
         let visits = current.visits.map((visit) =>
@@ -348,6 +364,7 @@ export function useDispatchOperations() {
         }
         return {
           ...current,
+          incidents,
           visits,
           assignments: current.assignments.map((item) =>
             item.id === assignment.id

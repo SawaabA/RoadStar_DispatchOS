@@ -129,6 +129,22 @@ export function detectExceptions(
     });
   }
 
+  // Road disruptions arrive from the telemetry provider and are surfaced here
+  // so a 401 incident reaches the dispatcher's action list, not just the map.
+  for (const incident of state.incidents ?? []) {
+    const truck = state.trucks.find((item) => item.id === incident.truckId);
+    exceptions.push({
+      id: `route:${incident.id}`,
+      kind: "route",
+      severity: incident.severity,
+      title: incident.label,
+      detail: truck
+        ? `Truck ${truck.number}: ${incident.detail}`
+        : incident.detail,
+      view: "map",
+    });
+  }
+
   for (const visit of state.visits) {
     if (visit.departedAt) continue;
     const facility = state.facilities.find((item) => item.id === visit.facilityId);

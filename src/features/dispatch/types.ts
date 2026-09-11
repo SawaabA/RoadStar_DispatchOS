@@ -131,7 +131,22 @@ export type PlanProposal = {
   projectedDeadheadKm: number;
 };
 
-export type ExceptionKind = "equipment" | "detention" | "hos" | "pickup";
+export type RoadIncident = {
+  id: string;
+  kind: "traffic" | "closure" | "dock_wait" | "duty_change";
+  label: string;
+  detail: string;
+  severity: "critical" | "warning" | "info";
+  truckId: string;
+  startedAt: string;
+};
+
+export type ExceptionKind =
+  | "equipment"
+  | "detention"
+  | "hos"
+  | "pickup"
+  | "route";
 export type ExceptionSeverity = "critical" | "warning" | "info";
 
 export type DispatchException = {
@@ -141,7 +156,7 @@ export type DispatchException = {
   title: string;
   detail: string;
   // The screen that owns the action resolving this exception.
-  view: "dispatch" | "loads" | "fleet" | "detention";
+  view: "dispatch" | "loads" | "fleet" | "detention" | "map";
   loadId?: string;
   driverId?: string;
   assignmentId?: string;
@@ -156,4 +171,6 @@ export type DispatchState = {
   assignments: Assignment[];
   facilities: Facility[];
   visits: GeofenceVisit[];
+  // Absent in snapshots written before road incidents existed; read as [].
+  incidents?: RoadIncident[];
 };

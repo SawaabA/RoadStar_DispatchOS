@@ -66,6 +66,7 @@ const baseState = (): DispatchState => ({
     },
   ],
   assignments: [],
+  incidents: [],
   facilities: [
     {
       id: "F-1",
@@ -266,6 +267,35 @@ describe("detectExceptions", () => {
     state.loads[0]!.status = "completed";
 
     expect(kinds(state)).not.toContain("equipment");
+  });
+
+  it("surfaces a road incident from the telemetry provider", () => {
+    const state = baseState();
+    state.incidents = [
+      {
+        id: "E-1",
+        kind: "closure",
+        label: "Highway 401 lane closure",
+        detail: "Incident ahead has closed a lane.",
+        severity: "critical",
+        truckId: "T-1",
+        startedAt: offset(-5),
+      },
+    ];
+    const route = detectExceptions(state, NOW).find((i) => i.kind === "route");
+
+    expect(route?.severity).toBe("critical");
+    expect(route?.view).toBe("map");
+    expect(route?.detail).toMatch(/Truck 84/);
+    expect(route?.id).toBe("route:E-1");
+  });
+
+  it("tolerates a snapshot written before incidents existed", () => {
+    const state = baseState();
+    delete state.incidents;
+
+    expect(() => detectExceptions(state, NOW)).not.toThrow();
+    expect(kinds(state)).not.toContain("route");
   });
 
   it("summarises totals for the command centre badge", () => {

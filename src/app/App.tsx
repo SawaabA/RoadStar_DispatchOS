@@ -101,6 +101,7 @@ const EXCEPTION_GLYPH = {
   pickup: <Clock3 />,
   hos: <Clock3 />,
   detention: <Timer />,
+  route: <Route />,
 } as const;
 
 function Overview({
