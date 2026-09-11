@@ -131,6 +131,23 @@ export type PlanProposal = {
   projectedDeadheadKm: number;
 };
 
+export type ExceptionKind = "equipment" | "detention" | "hos" | "pickup";
+export type ExceptionSeverity = "critical" | "warning" | "info";
+
+export type DispatchException = {
+  id: string;
+  kind: ExceptionKind;
+  severity: ExceptionSeverity;
+  title: string;
+  detail: string;
+  // The screen that owns the action resolving this exception.
+  view: "dispatch" | "loads" | "fleet" | "detention";
+  loadId?: string;
+  driverId?: string;
+  assignmentId?: string;
+  facilityId?: string;
+};
+
 export type DispatchState = {
   loads: DispatchLoad[];
   drivers: Driver[];

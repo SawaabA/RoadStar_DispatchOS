@@ -18,7 +18,7 @@ P0 reproduced the dispatcher’s manual morning and automated the assignment dec
 | P1 capability | Spec source | Implementation | Verification | Status |
 |---|---|---|---|---|
 | Explainable recommendations | Blueprint, explainability layer^1 | Every feasible and rejected pairing carries structured `FeasibilityReason` codes, deadhead, pickup ETA, projected HOS margin, score and a generated explanation; contention is reported separately from a hard blocker | Vitest constraint suite, 22 cases, mutation-verified | Shipped |
-| Exceptions inbox | Blueprint, “build an exceptions system, not just a pretty dashboard”^1; brief, hidden-problem discovery^2 | Pure `detectExceptions(state, now)` deriving equipment, detention, HOS and pickup-window exceptions from live state | Vitest exception suite; interactive QA against the simulator | Planned |
+| Exceptions inbox | Blueprint, “build an exceptions system, not just a pretty dashboard”^1; brief, hidden-problem discovery^2 | Pure `detectExceptions(state, now)` deriving equipment, detention, HOS and pickup-window exceptions from live state; the command centre renders the result | Vitest exception suite, 16 cases, mutation-verified | Shipped |
 | Automatic re-plan | Blueprint, live re-optimization^1 | Per-assignment health check recomputing ETA and HOS margin from current position, emitting a proposal diff rather than mutating assignments | Vitest re-plan suite; simulated 401 incident | Planned |
 | Deadhead / backhaul assistant | Blueprint, look-ahead over nearest-truck^1 | Downstream positioning term in the optimizer objective | Vitest scenario comparing look-ahead against nearest-truck | Planned |
 | KPI surface | Brief, workflow speed and financial value^2 | Open loads, active trips, available drivers, detention revenue, speed, ETA, distance and route progress | Production build and visual QA | Shipped |
@@ -58,7 +58,9 @@ The inbox detects and explains. It does not remediate, re-plan or reassign; auto
 
 ## Correction to the P0 record
 
-The P0 implementation document lists an exceptions inbox under “P1 capabilities included.”^3 That entry overstates the shipped state. The command centre currently renders three fixed exception cards and a fixed open count in `src/app/App.tsx`; none of the three is derived from dispatch state, so the panel does not respond when the underlying condition is resolved. The capability is tracked here as Planned, and this document supersedes that claim.
+The P0 implementation document listed an exceptions inbox under “P1 capabilities included.”^3 That entry overstated the state at the time: the command centre rendered three fixed exception cards and a fixed open count in `src/app/App.tsx`, none of them derived from dispatch state, so the panel did not respond when the underlying condition was resolved.
+
+The capability is now genuinely implemented. Detection reproduces all three conditions the fixed cards described — the flatbed load with no compatible trailer, the London Terminal detention overrun, and the thin HOS margin on D-052 — from live state rather than from literals, and each now disappears when a dispatcher resolves it. The fixed cards were an accurate snapshot of the seeded demo, which is why the derived output matches them.
 
 ## Operational limitations
 
@@ -66,6 +68,7 @@ The P0 implementation document lists an exceptions inbox under “P1 capabilitie
 - The optimizer scores each load in isolation. The downstream and utilization terms of the blueprint’s objective are absent, so a pairing that strands a unit after delivery is not penalised.^1
 - Driver HOS carries three clocks. The brief additionally specifies a 16-hour elapsed window, which is not represented.^2
 - The telemetry simulator interpolates movement but generates no events. Automatic re-plan cannot be demonstrated until route delays, dock waits and duty-cycle shifts can be injected, which the brief lists as required simulator functionality.^2
+- Exceptions are derived on every state change and are not persisted, so there is no exception history or dismissal state; a condition that resolves and recurs presents as a new entry.
 - No P1 capability writes to the relational schema. Dispatch state synchronises as a single snapshot document, so the `recommendations` and `detention_events` tables created by the P0 migration remain unwritten.
 
 ## Sources

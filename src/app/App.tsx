@@ -90,6 +90,19 @@ function Badge({
   return <span className={`badge ${tone}`}>{children}</span>;
 }
 
+const EXCEPTION_ICON = {
+  critical: "danger-icon",
+  warning: "amber-icon",
+  info: "blue-icon",
+} as const;
+
+const EXCEPTION_GLYPH = {
+  equipment: <AlertTriangle />,
+  pickup: <Clock3 />,
+  hos: <Clock3 />,
+  detention: <Timer />,
+} as const;
+
 function Overview({
   ops,
   onNavigate,
@@ -97,7 +110,8 @@ function Overview({
   ops: ReturnType<typeof useDispatchOperations>;
   onNavigate: (v: View) => void;
 }) {
-  const { state, metrics, simulationRunning, setSimulationRunning } = ops,
+  const { state, metrics, exceptions, simulationRunning, setSimulationRunning } =
+      ops,
     active = state.assignments.filter((a) => a.status !== "completed"),
     urgent = state.loads.filter(
       (l) => l.status === "unassigned" && l.priority !== "standard",
@@ -212,41 +226,32 @@ function Overview({
               <p className="kicker">ACTION REQUIRED</p>
               <h2>Exceptions</h2>
             </div>
-            <Badge tone="amber">3 open</Badge>
+            <Badge tone={exceptions.length ? "amber" : "green"}>
+              {exceptions.length ? `${exceptions.length} open` : "All clear"}
+            </Badge>
           </div>
-          <button className="exception" onClick={() => onNavigate("dispatch")}>
-            <span className="danger-icon">
-              <AlertTriangle />
-            </span>
-            <div>
-              <b>No compatible trailer</b>
-              <p>
-                RS-4530 requires a flatbed; none appears in the active asset
-                master.
-              </p>
-            </div>
-            <ArrowRight />
-          </button>
-          <button className="exception" onClick={() => onNavigate("detention")}>
-            <span className="amber-icon">
-              <Timer />
-            </span>
-            <div>
-              <b>Detention now billable</b>
-              <p>Truck 67 has been at London Terminal for 2h 18m.</p>
-            </div>
-            <ArrowRight />
-          </button>
-          <button className="exception">
-            <span className="blue-icon">
-              <Clock3 />
-            </span>
-            <div>
-              <b>HOS margin tightening</b>
-              <p>Driver D-052 has 3h 06m driving remaining.</p>
-            </div>
-            <ArrowRight />
-          </button>
+          {exceptions.length === 0 && (
+            <p className="empty-note">
+              No equipment, HOS, pickup or detention exceptions in the current
+              plan.
+            </p>
+          )}
+          {exceptions.map((item) => (
+            <button
+              className="exception"
+              key={item.id}
+              onClick={() => onNavigate(item.view)}
+            >
+              <span className={EXCEPTION_ICON[item.severity]}>
+                {EXCEPTION_GLYPH[item.kind]}
+              </span>
+              <div>
+                <b>{item.title}</b>
+                <p>{item.detail}</p>
+              </div>
+              <ArrowRight />
+            </button>
+          ))}
         </section>
       </div>
       <section className="surface">

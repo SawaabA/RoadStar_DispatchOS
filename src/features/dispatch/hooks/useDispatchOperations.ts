@@ -3,6 +3,7 @@ import distance from "@turf/distance";
 import { point } from "@turf/helpers";
 import { createDemoState } from "../data/demoData";
 import { buildMorningPlan, evaluateCandidate } from "../lib/optimizer";
+import { detectExceptions } from "../lib/exceptions";
 import type {
   Assignment,
   DispatchCandidate,
@@ -571,6 +572,9 @@ export function useDispatchOperations() {
   const signOut = useCallback(async () => {
     await supabase?.auth.signOut();
   }, []);
+  // Recomputed from live state, so an exception disappears as soon as the
+  // dispatcher resolves the condition behind it.
+  const exceptions = useMemo(() => detectExceptions(state), [state]);
   const metrics = useMemo(
     () => ({
       open: state.loads.filter((l) => l.status === "unassigned").length,
@@ -595,6 +599,7 @@ export function useDispatchOperations() {
   return {
     state,
     metrics,
+    exceptions,
     proposal,
     setProposal,
     simulationRunning,
