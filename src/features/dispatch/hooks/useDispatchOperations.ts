@@ -6,10 +6,13 @@ import { isDispatchState } from "../lib/stateValidation";
 import { updateGeofenceVisits } from "../lib/geofencing";
 import type {
   Assignment,
+  DecisionRecord,
   DispatchCandidate,
   DispatchState,
+  OptimizationWeights,
   PlanProposal,
 } from "../types";
+import type { BackhaulSuggestion, OperationalException, ReplanImpact } from "../../intelligence/types";
 import { supabase } from "../../../shared/lib/supabase";
 
 const STORAGE_KEY = "roadstar-dispatch-state-v2";
@@ -31,13 +34,15 @@ export function useDispatchOperations() {
   const [simulationRunning, setSimulationRunning] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<
-    "local" | "connecting" | "synced" | "error"
+    "local" | "connecting" | "synced" | "conflict" | "error"
   >("local");
   const stateRef = useRef(state);
   const organizationId = useRef<number | null>(null);
   const syncReady = useRef(false);
   const externalTelemetryAt = useRef(new Map<string, number>());
   const lastSyncedState = useRef<string | null>(null);
+  const snapshotRevision = useRef(0);
+  const persistedDecisionIds = useRef(new Set<string>());
   stateRef.current = state;
 
   useEffect(() => {
@@ -62,6 +67,8 @@ export function useDispatchOperations() {
       organizationId.current = null;
       syncReady.current = false;
       lastSyncedState.current = null;
+      snapshotRevision.current = 0;
+      persistedDecisionIds.current.clear();
       setSyncStatus("local");
       if (leavingCloudWorkspace) setState(createDemoState());
       return;
@@ -85,7 +92,7 @@ export function useDispatchOperations() {
       organizationId.current = orgId;
       const { data: snapshot, error } = await client
         .from("dispatch_snapshots")
-        .select("state")
+        .select("state, revision")
         .eq("organization_id", orgId)
         .maybeSingle();
       if (!active) return;
@@ -99,6 +106,7 @@ export function useDispatchOperations() {
           return;
         }
         lastSyncedState.current = JSON.stringify(snapshot.state);
+        snapshotRevision.current = Number(snapshot.revision ?? 0);
         setState(snapshot.state);
       } else {
         const { error: insertError } = await client
@@ -126,6 +134,7 @@ export function useDispatchOperations() {
             const row = payload.new as {
               organization_id?: number;
               state?: DispatchState;
+              revision?: number;
             };
             if (
               !isDispatchState(row.state) ||
@@ -134,8 +143,15 @@ export function useDispatchOperations() {
             )
               return;
             const serialized = JSON.stringify(row.state);
+            const localSerialized = JSON.stringify(stateRef.current);
+            const hasUnsavedLocalEdit = lastSyncedState.current !== null && localSerialized !== lastSyncedState.current;
+            if (hasUnsavedLocalEdit && serialized !== localSerialized) {
+              setSyncStatus("conflict");
+              return;
+            }
             lastSyncedState.current = serialized;
-            if (serialized !== JSON.stringify(stateRef.current))
+            snapshotRevision.current = Number(row.revision ?? snapshotRevision.current);
+            if (serialized !== localSerialized)
               setState(row.state);
           },
         )
@@ -160,21 +176,43 @@ export function useDispatchOperations() {
     const client = supabase;
     const timer = window.setTimeout(async () => {
       setSyncStatus("connecting");
-      const { data } = await client.auth.getUser();
-      const { error } = await client.from("dispatch_snapshots").upsert({
-        organization_id: organizationId.current,
-        state,
-        updated_by: data.user?.id,
-        updated_at: new Date().toISOString(),
+      const { data, error } = await client.rpc("save_dispatch_snapshot", {
+        p_organization_id: organizationId.current,
+        p_state: state,
+        p_expected_revision: snapshotRevision.current,
       });
-      if (error) setSyncStatus("error");
+      if (error?.code === "40001") setSyncStatus("conflict");
+      else if (error) setSyncStatus("error");
       else {
+        snapshotRevision.current = Number(data);
         lastSyncedState.current = serialized;
         setSyncStatus("synced");
       }
     }, 600);
     return () => window.clearTimeout(timer);
   }, [state]);
+
+  useEffect(() => {
+    if (!supabase || !syncReady.current || !organizationId.current) return;
+    const unsaved = (state.decisionLog ?? []).filter((item) => !persistedDecisionIds.current.has(item.id));
+    if (!unsaved.length) return;
+    const client = supabase;
+    const orgId = organizationId.current;
+    void (async () => {
+      const { data: user } = await client.auth.getUser();
+      const { error } = await client.from("decision_records").upsert(unsaved.map((item) => ({
+        organization_id: orgId,
+        external_id: item.id,
+        kind: item.kind,
+        outcome: item.outcome,
+        summary: item.summary,
+        decided_by: user.user?.id,
+        created_at: item.createdAt,
+      })), { onConflict: "organization_id,external_id" });
+      if (error) { setSyncStatus("error"); return; }
+      unsaved.forEach((item) => persistedDecisionIds.current.add(item.id));
+    })();
+  }, [state.decisionLog]);
 
   const candidateFor = useCallback(
     (loadId: string, driverId: string): DispatchCandidate | null => {
@@ -209,14 +247,84 @@ export function useDispatchOperations() {
   );
 
   const generatePlan = useCallback(
-    () => setProposal(buildMorningPlan(state.loads, state.drivers, state.trailers, state.trucks)),
+    () => setProposal(buildMorningPlan(state.loads, state.drivers, state.trailers, state.trucks, state.optimizationWeights)),
     [state],
   );
   const applyPlan = useCallback(() => {
     if (!proposal) return;
     proposal.candidates.forEach((item) => assign(item, "proposed"));
+    setState((current) => ({
+      ...current,
+      decisionLog: [...(current.decisionLog ?? []), ({
+        id: `${proposal.id}:accepted`,
+        kind: "plan",
+        outcome: "accepted",
+        createdAt: new Date().toISOString(),
+        summary: `Approved morning plan with ${proposal.candidates.length} assignments`,
+      } satisfies DecisionRecord)].slice(-500),
+    }));
     setProposal(null);
   }, [proposal, assign]);
+
+  const recordDecision = useCallback((record: DecisionRecord) => setState((current) => ({
+    ...current,
+    decisionLog: [...(current.decisionLog ?? []).filter((item) => item.id !== record.id), record].slice(-500),
+  })), []);
+
+  const acknowledgeException = useCallback((exception: OperationalException) => setState((current) => ({
+    ...current,
+    acknowledgedExceptionIds: [...new Set([...(current.acknowledgedExceptionIds ?? []), exception.id])],
+    decisionLog: [...(current.decisionLog ?? []), ({
+      id: `${exception.id}:acknowledged`, kind: "exception", outcome: "acknowledged",
+      createdAt: new Date().toISOString(), summary: `Acknowledged: ${exception.title}`,
+    } satisfies DecisionRecord)].slice(-500),
+  })), []);
+
+  const resolveReplan = useCallback((impact: ReplanImpact, outcome: "accepted" | "rejected") => setState((current) => ({
+    ...current,
+    assignments: outcome === "accepted" ? current.assignments.map((item) =>
+      item.id === impact.assignmentId ? { ...item, eta: impact.projectedEta } : item,
+    ) : current.assignments,
+    decisionLog: [...(current.decisionLog ?? []), ({
+      id: `${impact.id}:${outcome}`, kind: "replan", outcome,
+      createdAt: new Date().toISOString(),
+      summary: `${outcome === "accepted" ? "Approved" : "Rejected"} ${impact.addedDelayMinutes}-minute ETA re-plan for ${impact.loadId}`,
+    } satisfies DecisionRecord)].slice(-500),
+  })), []);
+
+  const resolveBackhaul = useCallback((suggestion: BackhaulSuggestion, outcome: "accepted" | "rejected") => recordDecision({
+    id: `${suggestion.id}:${outcome}`, kind: "backhaul", outcome,
+    createdAt: new Date().toISOString(),
+    summary: `${outcome === "accepted" ? "Reserved" : "Dismissed"} ${suggestion.loadId} after ${suggestion.assignmentId} (${Math.round(suggestion.avoidedEmptyKm)} km opportunity)`,
+  }), [recordDecision]);
+
+  const setOptimizationWeights = useCallback((optimizationWeights: OptimizationWeights) =>
+    setState((current) => ({ ...current, optimizationWeights })), []);
+
+  const reloadCloud = useCallback(async () => {
+    if (!supabase || !organizationId.current) return;
+    setSyncStatus("connecting");
+    const { data, error } = await supabase.from("dispatch_snapshots").select("state, revision").eq("organization_id", organizationId.current).single();
+    if (error || !isDispatchState(data?.state)) { setSyncStatus("error"); return; }
+    snapshotRevision.current = Number(data.revision ?? 0);
+    lastSyncedState.current = JSON.stringify(data.state);
+    setState(data.state);
+    setSyncStatus("synced");
+  }, []);
+
+  const saveP1Record = useCallback(async (
+    table: "historical_replay_runs" | "cargo_items",
+    values: Record<string, unknown>,
+  ) => {
+    if (!supabase || !organizationId.current)
+      return "Available locally; sign in to persist this record to Supabase.";
+    const payload = { ...values, organization_id: organizationId.current };
+    const { error } = table === "cargo_items"
+      ? await supabase.from(table).upsert(payload, { onConflict: "organization_id,external_id" })
+      : await supabase.from(table).insert(payload);
+    if (error) { setSyncStatus("error"); return error.message; }
+    return null;
+  }, []);
 
   const updateAssignmentStatus = useCallback(
     (assignmentId: string, status: Assignment["status"]) =>
@@ -572,6 +680,13 @@ export function useDispatchOperations() {
     generatePlan,
     applyPlan,
     updateAssignmentStatus,
+    acknowledgeException,
+    resolveReplan,
+    resolveBackhaul,
+    recordDecision,
+    setOptimizationWeights,
+    reloadCloud,
+    saveP1Record,
     reset,
   };
 }

@@ -19,8 +19,23 @@ export function isDispatchState(value: unknown): value is DispatchState {
   const truckIds = new Set(candidate.trucks.map((item) => item?.id));
   const trailerIds = new Set(candidate.trailers.map((item) => item?.id));
   const facilityIds = new Set(candidate.facilities.map((item) => item?.id));
+  const weights = candidate.optimizationWeights;
+  const validWeights = !weights || [weights.deadhead, weights.onTime, weights.hosBuffer, weights.futurePosition]
+    .every((item) => Number.isFinite(item) && item >= 0 && item <= 100);
+  const validAcknowledgements = !candidate.acknowledgedExceptionIds || (
+    Array.isArray(candidate.acknowledgedExceptionIds) && candidate.acknowledgedExceptionIds.every((item) => typeof item === "string")
+  );
+  const validDecisions = !candidate.decisionLog || (
+    Array.isArray(candidate.decisionLog) && candidate.decisionLog.every((item) =>
+      item && typeof item.id === "string" && typeof item.summary === "string" &&
+      ["plan", "replan", "exception", "backhaul"].includes(item.kind) &&
+      ["accepted", "rejected", "acknowledged"].includes(item.outcome) &&
+      Number.isFinite(Date.parse(item.createdAt)),
+    )
+  );
 
   return (
+    validWeights && validAcknowledgements && validDecisions &&
     candidate.loads.every((item) => item && typeof item.id === "string") &&
     candidate.drivers.every(
       (item) =>

@@ -61,6 +61,7 @@ export function evaluateCandidate(
 }
 
 export function buildMorningPlan(loads: DispatchLoad[], drivers: Driver[], trailers: TrailerAsset[], trucks: TruckAsset[] = [], weights: OptimizationWeights = DEFAULT_OPTIMIZATION_WEIGHTS): PlanProposal {
+  const generatedAt = Date.now()
   const openLoads = loads.filter(load=>load.status==='unassigned').sort((a,b)=>({critical:0,high:1,standard:2}[a.priority]-({critical:0,high:1,standard:2}[b.priority])))
   const available = drivers.filter(driver=>driver.status==='available')
   const matrices = openLoads.map(load=>available.flatMap(driver=>{
@@ -71,7 +72,7 @@ export function buildMorningPlan(loads: DispatchLoad[], drivers: Driver[], trail
       ? Math.min(...futureOptions.map(other=>kmBetween(load.destinationPoint, other.originPoint)))
       : 80
     const futureScore = Math.max(0, 100-nearestFutureKm)
-    return [evaluateCandidate(load,driver,trailer,trucks.find(t=>t.id===driver.truckId),Date.now(),weights,futureScore)]
+    return [evaluateCandidate(load,driver,trailer,trucks.find(t=>t.id===driver.truckId),generatedAt,weights,futureScore)]
   }).sort((a,b)=>b.score-a.score))
   let best: DispatchCandidate[] = []
   let bestScore = -Infinity
@@ -85,7 +86,7 @@ export function buildMorningPlan(loads: DispatchLoad[], drivers: Driver[], trail
   search(0,new Set(),[],0)
   const selectedLoads = new Set(best.map(item=>item.loadId))
   return {
-    id:`PLAN-${Date.now()}`,generatedAt:new Date().toISOString(),candidates:best,
+    id:`PLAN-${generatedAt}`,generatedAt:new Date(generatedAt).toISOString(),candidates:best,
     rejectedLoads:openLoads.filter(load=>!selectedLoads.has(load.id)).map(load=>({loadId:load.id,reasons:[...new Set(matrices[openLoads.indexOf(load)].flatMap(c=>c.reasons.map(r=>r.label)))].slice(0,3)})),
     projectedDeadheadKm:best.reduce((sum,item)=>sum+item.deadheadKm,0),
   }

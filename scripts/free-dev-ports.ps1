@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Stop'
-$roadStarPorts = @(5173, 7070, 7071)
+$roadStarPorts = @(5173, 7070, 7071, 7072)
 $listeners = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
   Where-Object { $roadStarPorts -contains $_.LocalPort }
 
@@ -11,6 +11,7 @@ foreach ($listener in $listeners) {
   $isRoadStarProcess =
     $command -match 'RoadStar DispatchOS' -or
     $command -match 'services[\\/]telematics-simulator' -or
+    $command -match 'services[\\/]integration-gateway' -or
     $command -match 'LoaderServer'
 
   if ($isRoadStarProcess) {

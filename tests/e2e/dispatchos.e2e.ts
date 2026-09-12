@@ -28,6 +28,9 @@ test("all primary workspaces render without serious accessibility violations", a
     ["Detention", "Detention desk"],
     ["Driver view", "Hi, Sofia"],
     ["3D load planner", "3D trailer builder"],
+    ["Intelligence", "Exceptions and automatic re-planning"],
+    ["KPI & replay", "KPI and historical replay"],
+    ["Integrations", "Integration adapters"],
   ] as const;
 
   for (const [navigation, heading] of workspaces) {
@@ -95,4 +98,31 @@ test("global search, map style, and detention evidence controls work", async ({
   await page.getByRole("button", { name: /^Detention/ }).click();
   await page.getByText("View record").first().click();
   await expect(page.locator("details").first()).toHaveAttribute("open", "");
+});
+
+test("dispatcher can review and record an incident re-plan decision", async ({ page }) => {
+  await page.getByRole("button", { name: /^Intelligence/ }).click();
+  await page.getByRole("button", { name: "Inject demo closure" }).click();
+  const proposal = page.locator(".decision-card").filter({ hasText: "+35 min" }).first();
+  await expect(proposal).toContainText("+35 min");
+  await proposal.getByRole("button", { name: "Approve ETA" }).click();
+  await expect(proposal).toContainText("Decision recorded: approved");
+  await expect(page.locator(".decision-log")).toContainText("Approved 35-minute ETA re-plan");
+});
+
+test("historical replay labels opportunity rather than guaranteed savings", async ({ page }) => {
+  await page.getByRole("button", { name: /^KPI & replay/ }).click();
+  await page.getByRole("button", { name: "Run lane-match replay" }).click();
+  await expect(page.getByText("147,760 km opportunity")).toBeVisible();
+  await expect(page.getByText(/not guaranteed savings/i).first()).toBeVisible();
+});
+
+test("irregular cargo estimates pallet displacement and reaches the 3D plan", async ({ page }) => {
+  await page.getByRole("button", { name: "3D load planner", exact: true }).click();
+  await page.getByText("Add irregular cargo").click();
+  await expect(page.getByText(/pallet positions forgone/)).toBeVisible();
+  await page.getByRole("button", { name: "Add to trailer plan" }).click();
+  await expect(page.locator("article").filter({ hasText: "Forklift" }).getByText("Forklift", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Regenerate plan" }).click();
+  await expect(page.getByText(/operator-entered dimensions/i)).toBeVisible();
 });

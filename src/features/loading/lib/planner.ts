@@ -25,7 +25,7 @@ export function createPlan(loads: Load[], trailer: Trailer): Plan {
       id: `${load.id}-P${String(i + 1).padStart(2, '0')}`, loadId: load.id,
       x: 0, y: 0, z: 0, length: load.palletLengthIn, width: load.palletWidthIn, height: load.palletHeightIn,
       weightLbs: load.weightLbs / load.pallets, stop: load.stop,
-      destination: load.destination, color: colors[li % colors.length], estimated: true,
+      destination: load.destination, color: colors[li % colors.length], estimated: load.estimated ?? true,
     }))
   ).sort((a, b) => b.stop - a.stop || b.weightLbs - a.weightLbs)
 
@@ -71,7 +71,10 @@ export function createPlan(loads: Load[], trailer: Trailer): Plan {
     totalWeight += item.weightLbs
   }
   const usedFloorArea = items.reduce((s, p) => s + p.length * p.width, 0)
-  const warnings = ['Pallet geometry and individual weights are estimated from shipment totals. Verify before operational use.']
+  const warnings = loads.some((load) => load.estimated ?? true)
+    ? ['Pallet geometry and individual weights are estimated from shipment totals. Verify before operational use.']
+    : []
   if (unplanned.length) warnings.push(`${unplanned.length} pallet${unplanned.length === 1 ? '' : 's'} could not be planned due to space or weight capacity.`)
+  if (!trailer.axleModelVerified) warnings.push('Axle geometry is not calibrated for this tractor pairing. Verify axle weights before release.')
   return { items, unplanned, totalWeight, usedFloorArea, warnings, engine: 'browser-fallback' }
 }

@@ -1,6 +1,7 @@
 import { createServer } from 'node:http'
 
 const port = Number(process.env.SIMULATOR_PORT || 7071)
+const host = process.env.SIMULATOR_HOST || '127.0.0.1'
 const clients = new Set()
 const vehicles = [
   { truckId: 'T-067', progress: .68, speedKph: 92, distanceKm: 119, start: { lat: 42.9849, lng: -81.2453 }, end: { lat: 43.5183, lng: -79.8774 } },
@@ -44,4 +45,4 @@ setInterval(() => {
   }
 }, 1000)
 
-server.listen(port, '127.0.0.1', () => console.log(`[SIMULATOR] telemetry stream ready on http://127.0.0.1:${port}`))
+server.listen(port, host, () => console.log(`[SIMULATOR] telemetry stream ready on http://${host}:${port}`))

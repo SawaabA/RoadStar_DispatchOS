@@ -21,10 +21,10 @@ public final class LoaderServer {
     private static final Gson GSON = new Gson();
 
     record Trailer(String id, int lengthIn, int widthIn, int heightIn, float capacityLbs,
-                   float frontAxleLimitLbs, float rearAxleLimitLbs, float axleDistanceIn) {}
+                   float frontAxleLimitLbs, float rearAxleLimitLbs, float axleDistanceIn, boolean axleModelVerified) {}
     record Load(String id, String destination, float weightLbs, int pallets, int stop,
                 int palletLengthIn, int palletWidthIn, int palletHeightIn,
-                boolean rotatable, boolean stackable, float bearingLimitLbs) {}
+                boolean rotatable, boolean stackable, float bearingLimitLbs, boolean estimated) {}
     record PlanRequest(Trailer trailer, List<Load> loads) {}
     record Item(String id, String loadId, int x, int y, int z, int length, int width, int height,
                 float weightLbs, int stop, String destination, String color, boolean estimated,
@@ -33,12 +33,14 @@ public final class LoaderServer {
                         float usedFloorArea, List<String> warnings, String engine) {}
 
     public static void main(String[] args) throws Exception {
-        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 7070), 0);
+        String host = System.getenv().getOrDefault("SOLVER_HOST", "127.0.0.1");
+        int port = Integer.parseInt(System.getenv().getOrDefault("SOLVER_PORT", "7070"));
+        HttpServer server = HttpServer.create(new InetSocketAddress(host, port), 0);
         server.createContext("/api/health", exchange -> send(exchange, 200, "{\"status\":\"ok\",\"engine\":\"xflp-0.7.7\"}"));
         server.createContext("/api/plan", LoaderServer::plan);
         server.setExecutor(null);
         server.start();
-        System.out.println("RoadStar xflp service ready at http://127.0.0.1:7070");
+        System.out.println("RoadStar xflp service ready at http://" + host + ":" + port);
     }
 
     private static void plan(HttpExchange exchange) throws IOException {
@@ -64,7 +66,7 @@ public final class LoaderServer {
             throw new IllegalArgumentException("Trailer dimensions and capacity must be positive");
         }
         var container = solver.addContainer().setContainerType(t.id).setLength(t.lengthIn).setWidth(t.widthIn).setHeight(t.heightIn).setMaxWeight(t.capacityLbs);
-        if (t.frontAxleLimitLbs > 0 && t.rearAxleLimitLbs > 0 && t.axleDistanceIn > 0) {
+        if (t.axleModelVerified && t.frontAxleLimitLbs > 0 && t.rearAxleLimitLbs > 0 && t.axleDistanceIn > 0) {
             container.setFirstPermissibleAxleLoad(t.frontAxleLimitLbs);
             container.setSecondPermissibleAxleLoad(t.rearAxleLimitLbs);
             container.setAxleDistance(t.axleDistanceIn);
@@ -99,6 +101,7 @@ public final class LoaderServer {
         float floor = (float) placed.stream().mapToDouble(i -> i.length * i.width).sum();
         List<String> warnings = new ArrayList<>();
         warnings.add("Pallet geometry and individual weights are estimated from shipment totals. Verify before operational use.");
+        if (!t.axleModelVerified) warnings.add("Axle geometry is not calibrated for this tractor pairing. Verify axle weights before release.");
         if (!rejected.isEmpty()) warnings.add(rejected.size() + " pallets could not be planned under the selected constraints.");
         return new PlanResponse(placed, rejected, totalWeight, floor, warnings, "xflp-0.7.7");
     }
@@ -110,7 +113,7 @@ public final class LoaderServer {
         // RoadStar's shared contract uses X for trailer length and Y for width.
         return new Item(event.id(), load == null ? "unknown" : load.id, event.y(), event.x(), event.z(),
             event.l(), event.w(), event.h(), event.weight(), stop, load == null ? "Unknown" : load.destination,
-            colors[Math.floorMod(stop - 1, colors.length)], true, event.isRotatedPosition(), event.isInvalid());
+            colors[Math.floorMod(stop - 1, colors.length)], load == null || load.estimated, event.isRotatedPosition(), event.isInvalid());
     }
 
     private static void cors(HttpExchange exchange) {
