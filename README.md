@@ -58,4 +58,4 @@ npm start            # serve the built production app on :8080
 
 Set the browser-safe Supabase values in `.env.local`, then run `docker compose --env-file .env.local up --build` and open `http://localhost:8080`. On a host, set `APP_ORIGIN` to the public HTTPS origin. Never provide a service-role key to the web build.
 
-See [P0 implementation](docs/P0-implementation.md), [P1 implementation](docs/P1-implementation.md), and the [deployment runbook](docs/deployment.md).
+See [P0 implementation](docs/P0-implementation.md), [P1 implementation](docs/P1-implementation.md), the [deployment runbook](docs/deployment.md), and the [deployment context briefing](docs/deployment-context.md).
