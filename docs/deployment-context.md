@@ -175,8 +175,13 @@ sync between dispatchers.
 
 ## 9. Containerization
 
-Four Dockerfiles plus `docker-compose.yml`, already written. **Untested** — no container build has
-been run.
+Four Dockerfiles plus `docker-compose.yml`. **Verified** — all four images build and the full stack
+runs end to end in containers: static assets, SPA deep links, all three proxied APIs, live Ontario
+511 data fetched from inside the container network, and the Supabase publishable key correctly baked
+into the bundle through build args.
+
+Image sizes: web 235 MB, solver 484 MB, simulator 232 MB, integrations 232 MB (~1.2 GB total).
+All four containers run as non-root.
 
 - `Dockerfile.web` — two-stage: `node:22-alpine` builds, then serves `dist/` via `web-server`.
   Takes `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` as **build args**.
@@ -243,8 +248,16 @@ and four security headers (`X-Content-Type-Options`, `Referrer-Policy`, `Permiss
   environment will produce a bundle with no Supabase configuration and silently run in demo mode.
 - **`APP_ORIGIN` must match the real public origin** or the traffic gateway's CORS will reject
   browser requests.
-- **CI currently targets `windows-latest`.** All scripts are cross-platform now, so a Linux runner
-  would work and be cheaper, but this has not been changed.
+- **CI currently targets `windows-latest` and has no deploy job.** The only workflow runs the
+  quality gate. Building images, pushing to a registry, and releasing to a host all need to be
+  written. All scripts are cross-platform now, so a Linux runner would work and be cheaper.
+- **Nothing in the stack terminates TLS.** `web-server` speaks plain HTTP. A public deployment needs
+  a reverse proxy (Caddy, nginx, or a provider edge) in front of it.
+- **`docker compose build` runs `npm ci` and `vite build` inside the image.** On a small host (1 GB
+  RAM) this can be killed by the OOM reaper. Building images in CI and having the host pull them
+  avoids the problem entirely and is the recommended pattern.
+- **`ports` in an override file merges rather than replaces.** Use the `!override` tag to change the
+  published port.
 - The Java version is inconsistent between paths: local build targets Java 17, the Docker image uses
   JDK 21. Both work; worth aligning eventually.
 
