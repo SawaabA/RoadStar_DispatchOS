@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Box, RotateCcw, Sparkles, Truck } from "lucide-react";
+import { AlertTriangle, Box, Plus, RotateCcw, Sparkles, Trash2, Truck } from "lucide-react";
 import { TrailerScene } from "./TrailerScene";
 import { solvePlan } from "../lib/solver";
 import { validatePlanInput } from "../lib/planner";
+import { estimatePalletDisplacement } from "../lib/palletEquivalents";
 import type { Load, PackedItem, Plan, Trailer } from "../types";
 
 const trailer: Trailer = {
@@ -14,6 +15,7 @@ const trailer: Trailer = {
   frontAxleLimitLbs: 12000,
   rearAxleLimitLbs: 34000,
   axleDistanceIn: 480,
+  axleModelVerified: false,
 };
 const initial: Load[] = [
   {
@@ -30,6 +32,8 @@ const initial: Load[] = [
     rotatable: true,
     stackable: false,
     bearingLimitLbs: 0,
+    cargoKind: "pallet",
+    estimated: true,
   },
   {
     id: "RS-4534",
@@ -45,9 +49,19 @@ const initial: Load[] = [
     rotatable: true,
     stackable: true,
     bearingLimitLbs: 2500,
+    cargoKind: "pallet",
+    estimated: true,
   },
 ];
-export function LoaderWorkspace() {
+
+const cargoPresets = {
+  forklift: { label: "Forklift", lengthIn: 144, widthIn: 60, heightIn: 84, weightLbs: 9000 },
+  machine: { label: "Industrial machine", lengthIn: 96, widthIn: 72, heightIn: 78, weightLbs: 6500 },
+  crate: { label: "Oversized crate", lengthIn: 72, widthIn: 60, heightIn: 60, weightLbs: 3000 },
+  custom: { label: "Custom cargo", lengthIn: 48, widthIn: 40, heightIn: 48, weightLbs: 1500 },
+};
+
+export function LoaderWorkspace({ onPersistCargo }: { onPersistCargo?: (values: Record<string, unknown>) => Promise<string | null> }) {
   const [loads, setLoads] = useState(initial),
     [plan, setPlan] = useState<Plan & { engine: string }>({
       items: [],
@@ -60,7 +74,12 @@ export function LoaderWorkspace() {
     [stop, setStop] = useState(0),
     [selected, setSelected] = useState<PackedItem | null>(null),
     [loading, setLoading] = useState(true),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [cargo, setCargo] = useState({ ...cargoPresets.forklift, quantity: 1, clearanceIn: 3, rotatable: true }),
+    [saveMessage, setSaveMessage] = useState("");
+  const cargoEstimate = useMemo(() => {
+    try { return estimatePalletDisplacement(cargo, trailer); } catch { return null; }
+  }, [cargo]);
   const generatePlan = useCallback(async (nextLoads: Load[]) => {
     const issues = validatePlanInput(nextLoads, trailer);
     if (issues.length) {
@@ -105,14 +124,14 @@ export function LoaderWorkspace() {
           <article key={l.id}>
             <div>
               <i className={`cargo c${i}`} />
-              <b>{l.id}</b>
-              <small>STOP {l.stop}</small>
+              <b>{l.cargoLabel ?? l.id}</b>
+              <small>{l.cargoKind === "irregular" ? `${l.id} · ` : ""}STOP {l.stop}</small>
             </div>
             <p>
               {l.origin} → {l.destination}
             </p>
             <label>
-              PALLETS
+              {l.cargoKind === "irregular" ? "PIECES" : "PALLETS"}
               <input
                 type="number"
                 min="1"
@@ -143,8 +162,29 @@ export function LoaderWorkspace() {
                 }
               />
             </label>
+            {l.cargoKind === "irregular" && <button className="remove-cargo" aria-label={`Remove ${l.cargoLabel ?? l.id}`} onClick={() => setLoads((current) => current.filter((item) => item.id !== l.id))}><Trash2 />Remove</button>}
           </article>
         ))}
+        <details className="cargo-estimator">
+          <summary><Plus />Add irregular cargo</summary>
+          <p>Enter the real outer dimensions. Clearance reserves handling space around each item.</p>
+          <label className="wide">PRESET<select value={Object.entries(cargoPresets).find(([, value]) => value.label === cargo.label)?.[0] ?? "custom"} onChange={(event) => { const preset = cargoPresets[event.target.value as keyof typeof cargoPresets]; setCargo((current) => ({ ...current, ...preset })); }}>{Object.entries(cargoPresets).map(([id, value]) => <option key={id} value={id}>{value.label}</option>)}</select></label>
+          <label className="wide">CARGO NAME<input value={cargo.label} onChange={(event) => setCargo((current) => ({ ...current, label: event.target.value }))} /></label>
+          {(["lengthIn", "widthIn", "heightIn", "weightLbs", "quantity", "clearanceIn"] as const).map((field) => <label key={field}>{({ lengthIn: "LENGTH IN", widthIn: "WIDTH IN", heightIn: "HEIGHT IN", weightLbs: "LB / ITEM", quantity: "QUANTITY", clearanceIn: "CLEARANCE IN" })[field]}<input type="number" min={field === "clearanceIn" ? 0 : 1} step="1" value={cargo[field]} onChange={(event) => setCargo((current) => ({ ...current, [field]: Number(event.target.value) }))} /></label>)}
+          <label className="cargo-check"><input type="checkbox" checked={cargo.rotatable} onChange={(event) => setCargo((current) => ({ ...current, rotatable: event.target.checked }))} />May rotate on floor</label>
+          <div className={`cargo-result ${cargoEstimate?.fitsEnvelope ? "" : "blocked"}`} role="status">
+            {cargoEstimate ? cargoEstimate.fitsEnvelope ? <><strong>≈ {cargoEstimate.palletEquivalents} pallet positions forgone</strong><small>Floor {cargoEstimate.floorEquivalent} · volume {cargoEstimate.volumeEquivalent} · weight {cargoEstimate.weightEquivalent}; conservative maximum used.</small></> : <strong>This cargo does not fit the trailer envelope.</strong> : <strong>Complete every field with a valid value.</strong>}
+          </div>
+          <button className="btn primary full" disabled={!cargoEstimate?.fitsEnvelope || !cargo.label.trim()} onClick={async () => {
+            if (!cargoEstimate?.fitsEnvelope) return;
+            const id = `CARGO-${Date.now()}`;
+            setLoads((current) => [...current, { id, origin: "Milton, ON", destination: "Next configured stop", weightLbs: cargo.weightLbs * cargo.quantity, pallets: cargo.quantity, stop: Math.max(1, ...current.map((item) => item.stop)) + 1, description: cargo.label, palletLengthIn: cargoEstimate.protectedDimensions.length, palletWidthIn: cargoEstimate.protectedDimensions.width, palletHeightIn: cargoEstimate.protectedDimensions.height, rotatable: cargo.rotatable, stackable: false, bearingLimitLbs: 0, cargoKind: "irregular", cargoLabel: cargo.label, clearanceIn: cargo.clearanceIn, estimated: false }]);
+            const message = await onPersistCargo?.({ external_id: id, cargo_kind: "irregular", label: cargo.label, quantity: cargo.quantity, length_in: cargo.lengthIn, width_in: cargo.widthIn, height_in: cargo.heightIn, weight_lbs: cargo.weightLbs, clearance_in: cargo.clearanceIn, rotatable: cargo.rotatable, stackable: false, estimated: false, pallet_equivalents: cargoEstimate.palletEquivalents });
+            setSaveMessage(message ?? (onPersistCargo ? "Cargo specification saved to Supabase." : "Cargo specification added to this plan."));
+          }}><Plus />Add to trailer plan</button>
+          {saveMessage && <small className="estimate-note" role="status">{saveMessage}</small>}
+          <small className="estimate-note">Pallet displacement is a planning estimate. The 3D solver still checks the actual protected geometry and weight.</small>
+        </details>
         <button className="btn primary full" onClick={() => void generatePlan(loads)} disabled={loading}>
           <Sparkles />
           {loading ? "Generating plan…" : "Regenerate plan"}
@@ -209,7 +249,8 @@ export function LoaderWorkspace() {
         <h3>VALIDATION</h3>
         <p className={requestedWeight <= trailer.capacityLbs ? "valid" : "warning"}>{requestedWeight <= trailer.capacityLbs ? "✓" : "!"} Shipment weight {requestedWeight <= trailer.capacityLbs ? "is within" : "exceeds"} trailer capacity</p>
         <p className={plan.unplanned.length ? "warning" : "valid"}>{plan.unplanned.length ? "! Review unplanned pallets" : "✓ All pallets placed in stop order"}</p>
-        <p className="warning">! Estimated pallet dimensions</p>
+        {!trailer.axleModelVerified && <p className="warning">! Axle geometry is not calibrated for this tractor pairing; verify axle weights before release.</p>}
+        {loads.some((load) => load.estimated ?? true) && <p className="warning">! Estimated pallet dimensions are marked; irregular cargo uses operator-entered dimensions.</p>}
         {plan.warnings.map((warning) => <p className="warning" key={warning}>! {warning}</p>)}
         {selected && (
           <div className="selected-pallet">

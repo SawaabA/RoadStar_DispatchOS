@@ -1,0 +1,36 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
+        VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY}
+    environment:
+      SOLVER_URL: http://solver:7070
+      SIMULATOR_URL: http://simulator:7071
+      INTEGRATION_URL: http://integrations:7072
+    ports:
+      - "8080:8080"
+    depends_on:
+      - solver
+      - simulator
+      - integrations
+    restart: unless-stopped
+  solver:
+    build:
+      context: .
+      dockerfile: Dockerfile.solver
+    restart: unless-stopped
+  simulator:
+    build:
+      context: .
+      dockerfile: Dockerfile.simulator
+    restart: unless-stopped
+  integrations:
+    build:
+      context: .
+      dockerfile: Dockerfile.integrations
+    environment:
+      APP_ORIGIN: ${APP_ORIGIN:-http://localhost:8080}
+    restart: unless-stopped

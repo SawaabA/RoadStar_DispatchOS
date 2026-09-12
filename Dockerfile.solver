@@ -1,0 +1,17 @@
+FROM eclipse-temurin:21-jdk AS build
+WORKDIR /solver
+RUN mkdir -p .deps out && \
+    curl -fsSL https://repo1.maven.org/maven2/com/github/hschneid/xflp/0.7.7-RELEASE/xflp-0.7.7-RELEASE.jar -o .deps/xflp.jar && \
+    curl -fsSL https://repo1.maven.org/maven2/com/google/guava/guava/33.7.1-jre/guava-33.7.1-jre.jar -o .deps/guava.jar && \
+    curl -fsSL https://repo1.maven.org/maven2/com/google/code/gson/gson/2.13.2/gson-2.13.2.jar -o .deps/gson.jar
+COPY services/loading-solver/src ./src
+RUN javac --release 21 -cp '.deps/*' -d out $(find src -name '*.java')
+
+FROM eclipse-temurin:21-jre
+WORKDIR /solver
+ENV SOLVER_HOST=0.0.0.0 SOLVER_PORT=7070
+COPY --from=build /solver/.deps ./.deps
+COPY --from=build /solver/out ./out
+USER 10001
+EXPOSE 7070
+CMD ["java", "-cp", "out:.deps/*", "com.roadstar.loader.LoaderServer"]

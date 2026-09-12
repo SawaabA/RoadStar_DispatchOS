@@ -8,6 +8,7 @@ import type {
   Facility,
   TruckAsset,
 } from "../../dispatch/types";
+import type { RoadIncident } from "../../intelligence/types";
 
 type Props = {
   trucks: TruckAsset[];
@@ -17,6 +18,8 @@ type Props = {
   satellite: boolean;
   selectedTruckId?: string;
   onSelectTruck?: (id: string) => void;
+  incidents?: RoadIncident[];
+  onSelectIncident?: (id: string) => void;
 };
 
 const roadStyle = "https://tiles.openfreemap.org/styles/liberty";
@@ -43,6 +46,8 @@ export function FleetMap({
   satellite,
   selectedTruckId,
   onSelectTruck,
+  incidents = [],
+  onSelectIncident,
 }: Props) {
   const container = useRef<HTMLDivElement>(null),
     map = useRef<MapInstance | null>(null),
@@ -99,6 +104,16 @@ export function FleetMap({
           .addTo(map.current),
       );
     }
+    for (const incident of incidents) {
+      const el = document.createElement("button");
+      el.className = `incident-marker ${incident.severity}`;
+      el.setAttribute("aria-label", `${incident.roadway} ${incident.eventType}: ${incident.description}`);
+      el.title = `${incident.roadway} · ${incident.description}`;
+      el.textContent = "!";
+      el.onclick = () => onSelectIncident?.(incident.id);
+      markers.current.push(new maplibregl.Marker({ element: el })
+        .setLngLat([incident.point.lng, incident.point.lat]).addTo(map.current));
+    }
     const features = assignments.flatMap((a) => {
       const load = loads.find((l) => l.id === a.loadId);
       if (!load) return [];
@@ -151,6 +166,8 @@ export function FleetMap({
     selectedTruckId,
     onSelectTruck,
     satellite,
+    incidents,
+    onSelectIncident,
   ]);
   return <div className="fleet-map" ref={container} />;
 }
