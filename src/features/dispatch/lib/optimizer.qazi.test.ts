@@ -85,7 +85,7 @@ describe("evaluateCandidate", () => {
     const candidate = evaluateCandidate(
       makeLoad(),
       makeDriver({ truckId: "T-99", trailerId: "DV-99" }),
-      makeTrailer(),
+      makeTrailer({ id: "DV-99" }),
       NOW,
     );
 
@@ -257,7 +257,7 @@ describe("buildMorningPlan", () => {
     expect(plan.candidates).toHaveLength(1);
     expect(plan.candidates[0]?.loadId).toBe("L-1");
     expect(plan.rejectedLoads[0]?.loadId).toBe("L-2");
-    expect(plan.rejectedLoads[0]?.reasons[0]).toMatch(/higher-priority/i);
+    expect(plan.rejectedLoads[0]?.reasons[0]).toMatch(/unreserved unit/i);
   });
 
   it("totals projected deadhead across the accepted candidates", () => {

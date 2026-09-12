@@ -6,3 +6,27 @@
 .module-loading{height:calc(100vh - 64px);display:grid;place-items:center;align-content:center;gap:10px;background:#07110f;color:#dcebe5}.module-loading svg{color:#42d9a3}.module-loading b{font-size:11px}
 
 .empty-note{font-size:10px;color:#74837d;padding:18px 19px;margin:0;line-height:1.5}
+/* Quality and accessibility guardrails */
+:root{--muted:#52635c;--green:#087052;--green-dark:#065b43}
+button:focus-visible,input:focus-visible,summary:focus-visible,[tabindex]:focus-visible{outline:3px solid #2f8cff;outline-offset:2px}
+.crumb,.global-search,.profile small,.metric-card em,.movement-main p,.live-label,.page-heading>div>p:last-child,.map-toolbar p{color:#53635d}
+.kicker{color:#4c695f!important}
+.metric-card small,.movement-stat small,.map-detail-grid small,.visit-stats small{color:#53635d}
+.global-search{appearance:none;text-align:left;cursor:pointer}
+.empty-state{margin:18px;padding:18px;border:1px dashed #aab8b2;border-radius:8px;color:#4d5e57;background:#fff;text-align:center;font-size:11px}
+.assignment-foot button:disabled{color:#697972;cursor:not-allowed}
+.evidence details{margin-left:auto;max-width:260px;font-size:8px}.evidence summary{cursor:pointer;font-weight:700;text-align:right}.evidence details span{display:block;margin-top:6px;line-height:1.45;color:#70480e}
+.phone-main{padding:20px}
+.driver-stop-details{display:flex;flex-direction:column;gap:3px;margin:-2px 0 10px;padding:10px;border:1px solid var(--line);border-radius:8px;background:#fff;color:#40514a;font-size:9px}
+.driver-stop-details span{color:#53635d}
+.loader-error{padding:9px!important;border:1px solid #c85656;border-radius:6px;background:#351717;color:#ffd7d7!important;line-height:1.4}
+.metric-card strong i{color:#52635c}
+.truck-marker{background:#066b4d}
+.badge{color:#46564f}.badge.green{color:#056044}.badge.amber{color:#824b00}.badge.red{color:#992929}.badge.blue{color:#1f579e}
+.exception p,.candidate-copy p,.candidate-copy small,.route-line>span small,.load-meta,.assignment-top p,.assignment-foot,.resource-card p,.resource-stats small,.table-row small,.table-head,.driver-head p,.location-line small,.hos-grid small,.visit-top p,.detention-total small,.driver-greeting p,.mobile-route span small,.mobile-meta small,.mobile-hos span small{color:#4d5e57}
+.column-head{color:#4d5e57}.chip{color:#4d5e57}.chip.active,.assign-action,.assignment-load b{color:#056548}
+.avatar{color:#056044}.resource-card.assigned{opacity:1;background:#f3f6f4}.resource-stats .risk{color:#982b2b}
+.evidence,.evidence summary,.evidence b,.evidence small{color:#70480e}
+.driver-brand small{color:#056548}.driver-actions button.accept{background:#07694d;border-color:#07694d}
+.health-score small{color:#8ca099}
+.btn.xl span{background:#064d39;color:#fff}

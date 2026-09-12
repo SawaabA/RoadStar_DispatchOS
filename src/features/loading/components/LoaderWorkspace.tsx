@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Box, RotateCcw, Sparkles, Truck } from "lucide-react";
 import { TrailerScene } from "./TrailerScene";
 import { solvePlan } from "../lib/solver";
+import { validatePlanInput } from "../lib/planner";
 import type { Load, PackedItem, Plan, Trailer } from "../types";
 
 const trailer: Trailer = {
@@ -57,16 +58,31 @@ export function LoaderWorkspace() {
       engine: "connecting",
     }),
     [stop, setStop] = useState(0),
-    [selected, setSelected] = useState<PackedItem | null>(null);
+    [selected, setSelected] = useState<PackedItem | null>(null),
+    [loading, setLoading] = useState(true),
+    [error, setError] = useState("");
+  const generatePlan = useCallback(async (nextLoads: Load[]) => {
+    const issues = validatePlanInput(nextLoads, trailer);
+    if (issues.length) {
+      setError(issues.join(" "));
+      return;
+    }
+    setError("");
+    setLoading(true);
+    try {
+      const nextPlan = await solvePlan(nextLoads, trailer);
+      setPlan({ ...nextPlan, engine: nextPlan.engine || "browser" });
+      setSelected(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to generate a load plan.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
   useEffect(() => {
-    let alive = true;
-    solvePlan(loads, trailer).then(
-      (p) => alive && setPlan({ ...p, engine: p.engine || "browser" }),
-    );
-    return () => {
-      alive = false;
-    };
-  }, [loads]);
+    void generatePlan(initial);
+  }, [generatePlan]);
+  const requestedWeight = useMemo(() => loads.reduce((sum, load) => sum + (Number.isFinite(load.weightLbs) ? load.weightLbs : 0), 0), [loads]);
   const weight = Math.round((plan.totalWeight / trailer.capacityLbs) * 100),
     floor = Math.round(
       (plan.usedFloorArea / (trailer.lengthIn * trailer.widthIn)) * 100,
@@ -99,6 +115,8 @@ export function LoaderWorkspace() {
               PALLETS
               <input
                 type="number"
+                min="1"
+                step="1"
                 value={l.pallets}
                 onChange={(e) =>
                   setLoads((current) =>
@@ -113,6 +131,8 @@ export function LoaderWorkspace() {
               TOTAL LB
               <input
                 type="number"
+                min="1"
+                step="1"
                 value={l.weightLbs}
                 onChange={(e) =>
                   setLoads((current) =>
@@ -125,12 +145,13 @@ export function LoaderWorkspace() {
             </label>
           </article>
         ))}
-        <button className="btn primary full">
+        <button className="btn primary full" onClick={() => void generatePlan(loads)} disabled={loading}>
           <Sparkles />
-          Regenerate plan
+          {loading ? "Generating plan…" : "Regenerate plan"}
         </button>
+        {error && <p className="loader-error" role="alert">{error}</p>}
       </aside>
-      <section className="loader-scene">
+      <section className="loader-scene" aria-label={`Interactive trailer plan with ${plan.items.length} planned and ${plan.unplanned.length} unplanned pallets`}>
         <div className="scene-label">
           <span>
             <i />
@@ -168,7 +189,7 @@ export function LoaderWorkspace() {
           {plan.unplanned.length ? 72 : 94}
           <small>/100</small>
         </div>
-        <span className="loader-ready">READY FOR REVIEW</span>
+        <span className="loader-ready" role="status">{loading ? "CALCULATING" : error ? "INPUT NEEDS ATTENTION" : "READY FOR REVIEW"}</span>
         <Metric
           label="Weight"
           value={`${plan.totalWeight.toLocaleString()} / ${trailer.capacityLbs.toLocaleString()} lb`}
@@ -186,12 +207,13 @@ export function LoaderWorkspace() {
           </span>
         </div>
         <h3>VALIDATION</h3>
-        <p className="valid">✓ Under trailer weight limit</p>
-        <p className="valid">✓ Stop-aware rear unloading</p>
+        <p className={requestedWeight <= trailer.capacityLbs ? "valid" : "warning"}>{requestedWeight <= trailer.capacityLbs ? "✓" : "!"} Shipment weight {requestedWeight <= trailer.capacityLbs ? "is within" : "exceeds"} trailer capacity</p>
+        <p className={plan.unplanned.length ? "warning" : "valid"}>{plan.unplanned.length ? "! Review unplanned pallets" : "✓ All pallets placed in stop order"}</p>
         <p className="warning">! Estimated pallet dimensions</p>
+        {plan.warnings.map((warning) => <p className="warning" key={warning}>! {warning}</p>)}
         {selected && (
           <div className="selected-pallet">
-            <button onClick={() => setSelected(null)}>×</button>
+            <button aria-label="Close pallet details" onClick={() => setSelected(null)}>×</button>
             <small>SELECTED PALLET</small>
             <b>{selected.id}</b>
             <p>{selected.destination}</p>
@@ -202,7 +224,11 @@ export function LoaderWorkspace() {
         )}
         <button
           className="btn secondary full"
-          onClick={() => setLoads(initial)}
+          onClick={() => {
+            setLoads(initial);
+            setStop(0);
+            void generatePlan(initial);
+          }}
         >
           <RotateCcw />
           Reset loads

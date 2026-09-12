@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { findJdk, jdkMissingMessage, MIN_RELEASE } from "./jdk.mjs";
 
 const root = dirname(fileURLToPath(import.meta.url));
@@ -67,7 +67,7 @@ export async function build() {
   return { jdk, classpath: `${out}${process.platform === "win32" ? ";" : ":"}${classpath}` };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   build().catch((error) => {
     console.error(`[SOLVER] ${error.message}`);
     process.exit(1);

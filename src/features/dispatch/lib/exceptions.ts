@@ -52,7 +52,7 @@ export function detectExceptions(
     const candidates = availableDrivers
       .map((driver) => {
         const trailer = state.trailers.find((item) => item.id === driver.trailerId);
-        return trailer ? evaluateCandidate(load, driver, trailer, now) : null;
+        return trailer ? evaluateCandidate(load, driver, trailer, { now, trucks: state.trucks, assignments: state.assignments }) : null;
       })
       .filter((candidate): candidate is DispatchCandidate => candidate !== null);
 

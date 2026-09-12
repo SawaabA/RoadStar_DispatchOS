@@ -62,7 +62,7 @@ const fmtMoney = (value: number) =>
     currency: "CAD",
     maximumFractionDigits: 0,
   }).format(value);
-const statusLabel = (value: string) => value.replace("_", " ");
+const statusLabel = (value: string) => value.replaceAll("_", " ");
 const NAV: Array<{ id: View; label: string; icon: typeof LayoutDashboard }> = [
   { id: "overview", label: "Command center", icon: LayoutDashboard },
   { id: "dispatch", label: "Dispatch board", icon: Route },
@@ -121,7 +121,7 @@ function Overview({
     <div className="page fade-in">
       <div className="page-heading">
         <div>
-          <p className="kicker">THURSDAY OPERATIONS · SOUTHERN ONTARIO</p>
+          <p className="kicker">TODAY'S OPERATIONS · SOUTHERN ONTARIO</p>
           <h1>Good morning, Dispatch</h1>
           <p>Here’s what needs attention across the network.</p>
         </div>
@@ -326,13 +326,14 @@ function AssignmentModal({
     <div
       className="modal-backdrop"
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
+      onKeyDown={(e) => e.key === "Escape" && onClose()}
     >
-      <section className="modal assignment-modal">
-        <button className="close" onClick={onClose}>
+      <section className="modal assignment-modal" role="dialog" aria-modal="true" aria-labelledby="assignment-title">
+        <button className="close" aria-label="Close assignment dialog" autoFocus onClick={onClose}>
           <X />
         </button>
         <p className="kicker">MANUAL DISPATCH</p>
-        <h2>
+        <h2 id="assignment-title">
           {load.billNumber} · {load.origin} → {load.destination}
         </h2>
         <p className="modal-sub">
@@ -390,9 +391,9 @@ function PlanModal({ ops }: { ops: ReturnType<typeof useDispatchOperations> }) {
   const { proposal, state, setProposal, applyPlan } = ops;
   if (!proposal) return null;
   return (
-    <div className="modal-backdrop">
-      <section className="modal plan-modal">
-        <button className="close" onClick={() => setProposal(null)}>
+    <div className="modal-backdrop" onKeyDown={(event) => event.key === "Escape" && setProposal(null)}>
+      <section className="modal plan-modal" role="dialog" aria-modal="true" aria-labelledby="plan-title">
+        <button className="close" aria-label="Close morning plan" autoFocus onClick={() => setProposal(null)}>
           <X />
         </button>
         <div className="plan-title">
@@ -401,7 +402,7 @@ function PlanModal({ ops }: { ops: ReturnType<typeof useDispatchOperations> }) {
           </span>
           <div>
             <p className="kicker">FLEET-WIDE PROPOSAL</p>
-            <h2>Morning plan ready</h2>
+            <h2 id="plan-title">Morning plan ready</h2>
             <p>
               {proposal.candidates.length} assignments ·{" "}
               {Math.round(proposal.projectedDeadheadKm)} km projected deadhead ·
@@ -532,6 +533,7 @@ function DispatchBoard({
         <div className="search">
           <Search />
           <input
+            aria-label="Search open loads"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search loads, cities, customers…"
@@ -556,7 +558,7 @@ function DispatchBoard({
         >
           High priority
         </button>
-        <button className="icon-btn">
+        <button className="icon-btn" aria-label="Additional dispatch filters" disabled title="More filters are planned">
           <Settings2 />
         </button>
       </div>
@@ -625,6 +627,7 @@ function DispatchBoard({
               </button>
             </article>
           ))}
+          {!open.length && <p className="empty-state">No open loads match these filters.</p>}
         </section>
         <section className="board-column planned">
           <div className="column-head">
@@ -660,7 +663,7 @@ function DispatchBoard({
                   <span>
                     <Clock3 /> ETA {fmtTime(a.eta)}
                   </span>
-                  <button onClick={() => unassign(load.id)}>Unassign</button>
+                  <button disabled={a.status === "in_transit"} title={a.status === "in_transit" ? "An in-transit load cannot be unassigned" : undefined} onClick={() => unassign(load.id)}>Unassign</button>
                 </div>
               </article>
             );
@@ -743,19 +746,20 @@ function LoadsPage({ ops }: { ops: ReturnType<typeof useDispatchOperations> }) {
             view.
           </p>
         </div>
-        <button className="btn primary">+ New load</button>
+        <button className="btn primary" disabled title="Load creation is planned for the next phase">+ New load</button>
       </div>
       <section className="surface table-surface">
         <div className="table-toolbar">
           <div className="search">
             <Search />
             <input
+              aria-label="Search all loads"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search bill, customer, or city"
             />
           </div>
-          <button className="btn secondary">
+          <button className="btn secondary" disabled title="Advanced filters are planned for the next phase">
             <ListFilter />
             Filters
           </button>
@@ -812,6 +816,7 @@ function LoadsPage({ ops }: { ops: ReturnType<typeof useDispatchOperations> }) {
               </span>
             </div>
           ))}
+          {!rows.length && <p className="empty-state">No loads match your search.</p>}
         </div>
       </section>
     </div>
@@ -927,11 +932,12 @@ function MapPage({ ops }: { ops: ReturnType<typeof useDispatchOperations> }) {
         <div className="segmented">
           <button
             className={!sat ? "active" : ""}
+            aria-pressed={!sat}
             onClick={() => setSat(false)}
           >
             Road
           </button>
-          <button className={sat ? "active" : ""} onClick={() => setSat(true)}>
+          <button className={sat ? "active" : ""} aria-pressed={sat} onClick={() => setSat(true)}>
             Satellite
           </button>
         </div>
@@ -962,7 +968,7 @@ function MapPage({ ops }: { ops: ReturnType<typeof useDispatchOperations> }) {
         />
         {selected && (
           <aside className="map-detail">
-            <button className="close" onClick={() => setTruck(undefined)}>
+            <button className="close" aria-label="Close truck details" onClick={() => setTruck(undefined)}>
               <X />
             </button>
             <p className="kicker">SELECTED ASSET</p>
@@ -1092,7 +1098,10 @@ function DetentionPage({
                       captured.
                     </small>
                   </span>
-                  <button>View record</button>
+                  <details>
+                    <summary>View record</summary>
+                    <span>Arrived {fmtTime(v.arrivedAt)}{v.departedAt ? ` · Departed ${fmtTime(v.departedAt)}` : " · Still on site"} · {billable} billable minutes at {fmtMoney(facility.detentionRate)}/h.</span>
+                  </details>
                 </div>
               )}
             </article>
@@ -1105,15 +1114,19 @@ function DetentionPage({
 
 function DriverPage({
   ops,
+  onNavigate,
 }: {
   ops: ReturnType<typeof useDispatchOperations>;
+  onNavigate: (v: View) => void;
 }) {
+  const [showStopDetails, setShowStopDetails] = useState(false);
   const assignment =
       ops.state.assignments.find((a) => a.driverId === "D-131") ||
       ops.state.assignments[0],
     load = ops.state.loads.find((l) => l.id === assignment?.loadId),
     driver = ops.state.drivers.find((d) => d.id === assignment?.driverId);
-  if (!assignment || !load || !driver) return null;
+  if (!assignment || !load || !driver) return <div className="page"><h1>Driver view</h1><p className="empty-state">There is no active driver assignment.</p></div>;
+  const legalToDrive = driver.drivingHoursRemaining > 0 && driver.onDutyHoursRemaining > 0 && driver.cycleHoursRemaining > 0;
   return (
     <div className="driver-demo fade-in">
       <div className="phone">
@@ -1130,7 +1143,7 @@ function DriverPage({
             <i /> Online
           </span>
         </header>
-        <main>
+        <div className="phone-main">
           <p className="kicker">TODAY’S ASSIGNMENT</p>
           <div className="driver-greeting">
             <h1>Hi, {driver.name.split(" ")[0]}</h1>
@@ -1196,20 +1209,28 @@ function DriverPage({
                 Start route
               </button>
             ) : (
-              <button className="accept">
+              <button className="accept" onClick={() => onNavigate("map")}>
                 <Navigation />
                 Open route
               </button>
             )}
-            <button>
+            <button
+              onClick={() =>
+                assignment.status === "proposed" || assignment.status === "dispatched"
+                  ? ops.unassign(load.id)
+                  : setShowStopDetails((visible) => !visible)
+              }
+              aria-expanded={assignment.status === "proposed" || assignment.status === "dispatched" ? undefined : showStopDetails}
+            >
               <MapPin />
-              Stop details
+              {assignment.status === "proposed" || assignment.status === "dispatched" ? "Decline load" : "Stop details"}
             </button>
           </div>
+          {showStopDetails && <div className="driver-stop-details" role="status"><b>Next stop: {load.destination}</b><span>Deliver by {fmtTime(load.deliveryEnd)} · {load.description}</span></div>}
           <section className="mobile-hos">
             <div>
               <p className="kicker">HOURS OF SERVICE</p>
-              <Badge tone="green">Legal to drive</Badge>
+              <Badge tone={legalToDrive ? "green" : "red"}>{legalToDrive ? "Legal to drive" : "HOS limit reached"}</Badge>
             </div>
             <div>
               <span>
@@ -1236,7 +1257,7 @@ function DriverPage({
               </span>
             </div>
           </section>
-        </main>
+        </div>
       </div>
       <aside className="driver-notes">
         <p className="kicker">RESPONSIVE DRIVER WORKFLOW</p>
@@ -1274,26 +1295,35 @@ function AuthModal({
 }) {
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
+    setSubmitting(true);
     setMessage("Sending secure link…");
-    const error = await ops.sendMagicLink(email);
-    setMessage(error || "Check your inbox for the RoadStar sign-in link.");
+    try {
+      const error = await ops.sendMagicLink(email);
+      setMessage(error || "Check your inbox for the RoadStar sign-in link.");
+    } catch {
+      setMessage("We could not send the link. Check your connection and try again.");
+    } finally {
+      setSubmitting(false);
+    }
   };
   return (
     <div
       className="modal-backdrop"
       onMouseDown={(event) => event.target === event.currentTarget && onClose()}
+      onKeyDown={(event) => event.key === "Escape" && onClose()}
     >
-      <form className="modal auth-modal" onSubmit={submit}>
-        <button type="button" className="close" onClick={onClose}>
+      <form className="modal auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title" onSubmit={submit}>
+        <button type="button" className="close" aria-label="Close account dialog" autoFocus onClick={onClose}>
           <X />
         </button>
         <span className="spark">
           <Database />
         </span>
         <p className="kicker">SECURE CLOUD SYNC</p>
-        <h2>
+        <h2 id="auth-title">
           {ops.userEmail ? "Dispatcher account" : "Connect your workspace"}
         </h2>
         {ops.userEmail ? (
@@ -1340,10 +1370,10 @@ function AuthModal({
                 placeholder="dispatcher@roadstar.ca"
               />
             </label>
-            <button className="btn primary full" type="submit">
-              Email me a secure link
+            <button className="btn primary full" type="submit" disabled={submitting}>
+              {submitting ? "Sending…" : "Email me a secure link"}
             </button>
-            {message && <p className="auth-message">{message}</p>}
+            {message && <p className="auth-message" role="status">{message}</p>}
           </>
         )}
       </form>
@@ -1365,7 +1395,18 @@ export default function App() {
     );
   useEffect(() => {
     window.history.replaceState(null, "", `#${view}`);
-  }, [view]);
+    document.title = `${title} · RoadStar DispatchOS`;
+  }, [view, title]);
+  useEffect(() => {
+    const openLoadSearch = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "k") return;
+      event.preventDefault();
+      setView("loads");
+      window.setTimeout(() => document.querySelector<HTMLInputElement>('[aria-label="Search all loads"]')?.focus(), 0);
+    };
+    window.addEventListener("keydown", openLoadSearch);
+    return () => window.removeEventListener("keydown", openLoadSearch);
+  }, []);
   return (
     <div className={`app-shell ${navOpen ? "" : "nav-collapsed"}`}>
       <aside className="sidebar">
@@ -1384,6 +1425,7 @@ export default function App() {
               className={view === item.id ? "active" : ""}
               onClick={() => setView(item.id)}
               title={item.label}
+              aria-current={view === item.id ? "page" : undefined}
             >
               <item.icon />
               <span>{item.label}</span>
@@ -1412,7 +1454,7 @@ export default function App() {
             </span>
             <i />
           </div>
-          <button onClick={ops.reset}>
+          <button onClick={() => window.confirm("Reset all local demo changes?") && ops.reset()}>
             <RefreshCw />
             <span>Reset demo</span>
           </button>
@@ -1420,19 +1462,22 @@ export default function App() {
       </aside>
       <main className="app-main">
         <header className="topbar">
-          <button className="menu-btn" onClick={() => setNavOpen(!navOpen)}>
+          <button className="menu-btn" aria-label={navOpen ? "Collapse navigation" : "Expand navigation"} aria-expanded={navOpen} onClick={() => setNavOpen(!navOpen)}>
             <Menu />
           </button>
           <div className="crumb">
             Operations <span>/</span> <b>{title}</b>
           </div>
           <div className="topbar-right">
-            <div className="global-search">
+            <button className="global-search" aria-label="Search loads" onClick={() => {
+              setView("loads");
+              window.setTimeout(() => document.querySelector<HTMLInputElement>('[aria-label="Search all loads"]')?.focus(), 0);
+            }}>
               <Search />
               <span>Search anything</span>
               <kbd>Ctrl K</kbd>
-            </div>
-            <button className="alert-button">
+            </button>
+            <button className="alert-button" aria-label="View 3 active exceptions" onClick={() => setView("overview")}>
               <AlertTriangle />
               <i>3</i>
             </button>
@@ -1457,7 +1502,7 @@ export default function App() {
           {view === "fleet" && <FleetPage ops={ops} />}{" "}
           {view === "map" && <MapPage ops={ops} />}{" "}
           {view === "detention" && <DetentionPage ops={ops} />}{" "}
-          {view === "driver" && <DriverPage ops={ops} />}{" "}
+          {view === "driver" && <DriverPage ops={ops} onNavigate={setView} />}{" "}
           {view === "loader" && (
             <Suspense
               fallback={

@@ -10,6 +10,21 @@ export type EquipmentType = "Dry Van" | "Reefer" | "Flatbed";
 
 export type Coordinates = { lat: number; lng: number };
 
+export type OptimizationWeights = {
+  deadhead: number;
+  onTime: number;
+  hosBuffer: number;
+  futurePosition: number;
+};
+
+export type DecisionRecord = {
+  id: string;
+  kind: "plan" | "replan" | "exception" | "backhaul";
+  summary: string;
+  outcome: "accepted" | "rejected" | "acknowledged";
+  createdAt: string;
+};
+
 export type DispatchLoad = {
   id: string;
   billNumber: string;
@@ -120,6 +135,12 @@ export type DispatchCandidate = {
   projectedHours: number;
   hosRemainingAfter: number;
   score: number;
+  scoreBreakdown: {
+    deadhead: number;
+    onTime: number;
+    hosBuffer: number;
+    futurePosition: number;
+  };
   explanation: string;
 };
 
@@ -173,4 +194,7 @@ export type DispatchState = {
   visits: GeofenceVisit[];
   // Absent in snapshots written before road incidents existed; read as [].
   incidents?: RoadIncident[];
+  acknowledgedExceptionIds?: string[];
+  decisionLog?: DecisionRecord[];
+  optimizationWeights?: OptimizationWeights;
 };

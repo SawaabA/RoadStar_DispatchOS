@@ -99,9 +99,10 @@ export function FleetMap({
           .addTo(map.current),
       );
     }
-    const features = assignments.map((a) => {
-      const load = loads.find((l) => l.id === a.loadId)!;
-      return {
+    const features = assignments.flatMap((a) => {
+      const load = loads.find((l) => l.id === a.loadId);
+      if (!load) return [];
+      return [{
         type: "Feature" as const,
         properties: { id: a.id },
         geometry: {
@@ -115,7 +116,7 @@ export function FleetMap({
             [load.destinationPoint.lng, load.destinationPoint.lat],
           ],
         },
-      };
+      }];
     });
     const update = () => {
       const source = map.current?.getSource("routes") as
@@ -141,7 +142,7 @@ export function FleetMap({
       }
     };
     if (map.current.isStyleLoaded()) update();
-    else map.current.once("load", update);
+    else map.current.once("style.load", update);
   }, [
     trucks,
     assignments,

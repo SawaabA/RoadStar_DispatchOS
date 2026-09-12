@@ -23,6 +23,14 @@ export const cityPoints = {
 };
 
 export const createDemoState = (): DispatchState => ({
+  acknowledgedExceptionIds: [],
+  decisionLog: [],
+  optimizationWeights: {
+    deadhead: 40,
+    onTime: 30,
+    hosBuffer: 20,
+    futurePosition: 10,
+  },
   loads: [
     {
       id: "L-4521",
