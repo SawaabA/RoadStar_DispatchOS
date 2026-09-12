@@ -8,7 +8,10 @@ export default defineConfig({
   reporter: "list",
   use: {
     baseURL: "http://localhost:5173",
-    channel: "chrome",
+    // Default to Playwright's bundled Chromium so the suite runs on any machine
+    // and pins one browser build. Set PLAYWRIGHT_CHANNEL=chrome to use a locally
+    // installed Google Chrome instead.
+    channel: process.env.PLAYWRIGHT_CHANNEL || undefined,
     headless: true,
     viewport: { width: 1440, height: 1000 },
     trace: "retain-on-failure",
