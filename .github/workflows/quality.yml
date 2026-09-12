@@ -18,3 +18,24 @@ jobs:
           java-version: 21
       - run: npm ci
       - run: npm run quality
+  container-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and start production stack
+        env:
+          VITE_SUPABASE_URL: https://example.supabase.co
+          VITE_SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci_placeholder
+          APP_ORIGIN: http://localhost:8080
+        run: docker compose up --build --detach --wait --wait-timeout 180
+      - name: Verify production readiness and direct SPA route
+        run: |
+          curl --fail --show-error http://127.0.0.1:8080/readyz
+          curl --fail --show-error http://127.0.0.1:8080/driver
+          curl --fail --show-error http://127.0.0.1:8080/api/integrations/health
+      - name: Capture container logs
+        if: failure()
+        run: docker compose logs --no-color
+      - name: Stop production stack
+        if: always()
+        run: docker compose down --volumes

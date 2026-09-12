@@ -10,6 +10,7 @@ RUN javac --release 21 -cp '.deps/*' -d out $(find src -name '*.java')
 FROM eclipse-temurin:21-jre
 WORKDIR /solver
 ENV SOLVER_HOST=0.0.0.0 SOLVER_PORT=7070
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 COPY --from=build /solver/.deps ./.deps
 COPY --from=build /solver/out ./out
 USER 10001

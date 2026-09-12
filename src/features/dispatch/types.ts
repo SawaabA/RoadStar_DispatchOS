@@ -19,11 +19,14 @@ export type OptimizationWeights = {
 
 export type DecisionRecord = {
   id: string;
-  kind: "plan" | "replan" | "exception" | "backhaul";
+  kind: "plan" | "replan" | "exception" | "backhaul" | "driver";
   summary: string;
-  outcome: "accepted" | "rejected" | "acknowledged";
+  outcome: "accepted" | "rejected" | "acknowledged" | "started" | "declined";
   createdAt: string;
 };
+
+export type OrganizationRole = "admin" | "dispatcher" | "driver" | "viewer";
+export type DriverAssignmentAction = "accepted" | "in_transit" | "declined";
 
 export type DispatchLoad = {
   id: string;

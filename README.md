@@ -38,6 +38,8 @@ npx supabase db push
 
 Signed-out visitors use a deterministic local demo. Selecting the user menu sends a Supabase magic link; authenticated dispatchers with an explicitly provisioned `organization_members` record share their organization state through Supabase Realtime. Account creation does not grant organization access automatically.
 
+Authenticated driver accounts also require an explicit `driver_user_links` record. Drivers are restricted to the driver/map experience, and assignment acceptance, route start, and decline are validated and audited inside Postgres.
+
 ## Commands
 
 ```powershell
@@ -54,6 +56,6 @@ npm start            # serve the built production app on :8080
 
 ## Container deployment
 
-Set the browser-safe Supabase values in `.env.local`, then run `docker compose --env-file .env.local up --build` and open `http://localhost:8080`. On a host, set `APP_ORIGIN` to the public HTTPS origin. Never provide a service-role key to the web build.
+Set the browser-safe Supabase values in `.env.local`, then run `docker compose --env-file .env.local up --build` and open `http://localhost:8080`. On a host, set `APP_ORIGIN` to the public HTTPS origin. Configure an OSRM-compatible `ROUTING_BASE_URL` and production ELD/TMS adapters with server-only variables when those providers are required. Never provide a service-role key to the web build.
 
 See [P0 implementation](docs/P0-implementation.md), [P1 implementation](docs/P1-implementation.md), and the [deployment runbook](docs/deployment.md).

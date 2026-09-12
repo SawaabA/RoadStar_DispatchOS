@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createDemoState } from "../../dispatch/data/demoData";
-import { buildBackhaulSuggestions, buildReplanImpacts, deriveExceptions } from "./intelligence";
+import { buildBackhaulSuggestions, buildReplanImpacts, deriveExceptions, providerStatuses } from "./intelligence";
 import { createInjectedClosure } from "./trafficProvider";
 
 describe("dispatch intelligence", () => {
@@ -25,5 +25,23 @@ describe("dispatch intelligence", () => {
     expect(suggestions.length).toBeGreaterThan(0);
     expect(suggestions.every((item) => item.projectedHosMargin >= 0)).toBe(true);
     expect(JSON.stringify(state)).toBe(before);
+  });
+
+  it("never labels demo or merely configured providers as live", () => {
+    const providers = providerStatuses({
+      cloud: true,
+      trafficLive: true,
+      simulatorLive: true,
+      solver: "xflp-0.7.7",
+      external: {
+        tms: { provider: "TMS", status: "not_configured" },
+        eld: { provider: "ELD", status: "not_configured" },
+        routing: { provider: "OSRM", status: "configured" },
+      },
+    });
+    expect(providers.find((item) => item.id === "tms")?.mode).toBe("ready");
+    expect(providers.find((item) => item.id === "eld")?.mode).toBe("demo");
+    expect(providers.find((item) => item.id === "routing")?.mode).toBe("ready");
+    expect(providers.find((item) => item.id === "traffic")?.mode).toBe("live");
   });
 });

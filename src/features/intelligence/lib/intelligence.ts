@@ -242,11 +242,15 @@ export function providerStatuses(options: {
   trafficLive: boolean;
   simulatorLive: boolean;
   solver: string;
+  external?: Record<string, { provider: string; status: string }>;
 }): ProviderStatus[] {
+  const tms = options.external?.tms;
+  const eld = options.external?.eld;
+  const routing = options.external?.routing;
   return [
-    { id: "tms", category: "TMS", provider: options.cloud ? "Supabase operational model" : "RoadStar demo adapter", mode: options.cloud ? "live" : "demo", status: "connected", capabilities: ["Loads", "Assignments", "Stops"], swapTarget: "McLeod / Alvys REST adapter" },
-    { id: "eld", category: "ELD / Telematics", provider: options.simulatorLive ? "RoadStar SSE simulator" : "Browser telemetry provider", mode: options.simulatorLive ? "live" : "fallback", status: options.simulatorLive ? "connected" : "degraded", capabilities: ["GPS", "Speed", "HOS clocks"], swapTarget: "Samsara / Motive adapter" },
-    { id: "routing", category: "Routing", provider: "RoadStar geometry adapter", mode: "demo", status: "available", capabilities: ["Distance", "ETA", "Route geometry"], swapTarget: "Mapbox Matrix / GraphHopper" },
+    { id: "tms", category: "TMS", provider: tms?.provider || "No production TMS configured", mode: tms?.status === "connected" ? "live" : "ready", status: tms?.status === "connected" ? "connected" : tms?.status === "degraded" ? "degraded" : "available", capabilities: ["Loads", "Assignments", "Stops"], swapTarget: "Set TMS health URL and API credential" },
+    { id: "eld", category: "ELD / Telematics", provider: eld?.status === "connected" ? eld.provider : options.simulatorLive ? "RoadStar SSE simulator" : "Browser telemetry provider", mode: eld?.status === "connected" ? "live" : options.simulatorLive ? "demo" : "fallback", status: eld?.status === "connected" ? "connected" : eld?.status === "degraded" ? "degraded" : options.simulatorLive ? "available" : "degraded", capabilities: ["GPS", "Speed", "HOS clocks"], swapTarget: "Set ELD health URL and use the RoadStar SSE contract" },
+    { id: "routing", category: "Routing", provider: routing?.provider || "Presentation geometry", mode: routing?.status === "configured" ? "ready" : "fallback", status: routing?.status === "configured" ? "available" : "degraded", capabilities: ["Distance", "ETA", "Road route geometry"], swapTarget: "Configure an OSRM-compatible routing service" },
     { id: "traffic", category: "Traffic", provider: options.trafficLive ? "Ontario 511" : "RoadStar incident fallback", mode: options.trafficLive ? "live" : "fallback", status: options.trafficLive ? "connected" : "degraded", capabilities: ["Events", "Construction", "Closures"], swapTarget: "Alternate provincial traffic feed" },
     { id: "loading", category: "Loading", provider: options.solver.startsWith("xflp") ? "xflp 0.7.7" : "Browser shelf packer", mode: options.solver.startsWith("xflp") ? "live" : "fallback", status: options.solver.startsWith("xflp") ? "connected" : "degraded", capabilities: ["Geometry", "Stop order", "Verified axle models"], swapTarget: "skjolber 3D bin packer" },
     { id: "database", category: "Database", provider: options.cloud ? "Supabase Postgres / PostGIS" : "Local deterministic state", mode: options.cloud ? "live" : "demo", status: "connected", capabilities: ["RLS", "Realtime", "Geospatial"], swapTarget: "Portable PostgreSQL" },

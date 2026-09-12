@@ -28,8 +28,8 @@ export function isDispatchState(value: unknown): value is DispatchState {
   const validDecisions = !candidate.decisionLog || (
     Array.isArray(candidate.decisionLog) && candidate.decisionLog.every((item) =>
       item && typeof item.id === "string" && typeof item.summary === "string" &&
-      ["plan", "replan", "exception", "backhaul"].includes(item.kind) &&
-      ["accepted", "rejected", "acknowledged"].includes(item.outcome) &&
+      ["plan", "replan", "exception", "backhaul", "driver"].includes(item.kind) &&
+      ["accepted", "rejected", "acknowledged", "started", "declined"].includes(item.outcome) &&
       Number.isFinite(Date.parse(item.createdAt)),
     )
   );

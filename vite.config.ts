@@ -7,6 +7,8 @@ export default defineConfig({
     proxy: {
       "/api/telemetry": "http://127.0.0.1:7071",
       "/api/traffic": "http://127.0.0.1:7072",
+      "/api/routing": "http://127.0.0.1:7072",
+      "/api/integrations": "http://127.0.0.1:7072",
       "/api": "http://127.0.0.1:7070",
     },
   },

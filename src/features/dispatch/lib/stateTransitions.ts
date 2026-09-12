@@ -1,8 +1,10 @@
 import { evaluateCandidate } from "./optimizer";
 import type {
   Assignment,
+  DecisionRecord,
   DispatchCandidate,
   DispatchState,
+  DriverAssignmentAction,
 } from "../types";
 
 export function assignCandidate(
@@ -100,5 +102,70 @@ export function unassignLoad(
         : item,
     ),
     assignments: current.assignments.filter((item) => item.id !== assignment.id),
+  };
+}
+
+export function transitionDriverAssignment(
+  current: DispatchState,
+  assignmentId: string,
+  driverId: string,
+  action: DriverAssignmentAction,
+  now = Date.now(),
+): DispatchState {
+  const assignment = current.assignments.find(
+    (item) => item.id === assignmentId && item.driverId === driverId,
+  );
+  if (!assignment) return current;
+
+  const canAccept = action === "accepted" && ["proposed", "dispatched"].includes(assignment.status);
+  const canStart = action === "in_transit" && assignment.status === "accepted";
+  const canDecline = action === "declined" && ["proposed", "dispatched"].includes(assignment.status);
+  if (!canAccept && !canStart && !canDecline) return current;
+  if (canDecline) {
+    const next = unassignLoad(current, assignment.loadId);
+    return {
+      ...next,
+      decisionLog: [
+        ...(next.decisionLog ?? []),
+        ({
+          id: `driver:${assignmentId}:${now}`,
+          kind: "driver",
+          outcome: "declined",
+          createdAt: new Date(now).toISOString(),
+          summary: `Driver declined assignment ${assignmentId}`,
+        } satisfies DecisionRecord),
+      ].slice(-500),
+    };
+  }
+
+  const nextStatus = action as Assignment["status"];
+  return {
+    ...current,
+    assignments: current.assignments.map((item) =>
+      item.id === assignmentId
+        ? {
+            ...item,
+            status: nextStatus,
+            acceptedAt: action === "accepted" ? new Date(now).toISOString() : item.acceptedAt,
+          }
+        : item,
+    ),
+    loads: current.loads.map((load) =>
+      load.id === assignment.loadId
+        ? { ...load, status: action === "in_transit" ? "in_transit" : "assigned" }
+        : load,
+    ),
+    decisionLog: [
+      ...(current.decisionLog ?? []),
+      ({
+        id: `driver:${assignmentId}:${now}`,
+        kind: "driver",
+        outcome: action === "in_transit" ? "started" : "accepted",
+        createdAt: new Date(now).toISOString(),
+        summary: action === "in_transit"
+          ? `Driver started assignment ${assignmentId}`
+          : `Driver accepted assignment ${assignmentId}`,
+      } satisfies DecisionRecord),
+    ].slice(-500),
   };
 }

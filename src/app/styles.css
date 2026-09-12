@@ -38,5 +38,8 @@ button:focus-visible,input:focus-visible,summary:focus-visible,[tabindex]:focus-
 .avatar{color:#056044}.resource-card.assigned{opacity:1;background:#f3f6f4}.resource-stats .risk{color:#982b2b}
 .evidence,.evidence summary,.evidence b,.evidence small{color:#70480e}
 .driver-brand small{color:#056548}.driver-actions button.accept{background:#07694d;border-color:#07694d}
+.driver-actions button:disabled{cursor:not-allowed;opacity:.55}.driver-action-error{margin:0 0 11px;padding:9px 10px;border:1px solid #efc7c4;border-radius:7px;background:#fff2f1;color:#9b3737;font-size:9px;line-height:1.45}
+.fleet-map-shell{position:relative;width:100%;height:100%}.route-mode{position:absolute;z-index:4;left:10px;bottom:10px;border:1px solid #d6dfdb;border-radius:999px;background:#fffffff0;color:#6b7b74;padding:5px 8px;font:600 7px DM Mono;letter-spacing:.08em;box-shadow:0 2px 8px #10261d1c}.route-mode.live{border-color:#a8ddca;background:#e6f7f0;color:#076c4e}.route-mode.fallback{border-color:#ead2a9;background:#fff6e6;color:#8a5a0d}
+.fatal-error{min-height:100vh;display:grid;place-content:center;justify-items:start;gap:12px;padding:40px;background:#f4f7f5;color:var(--ink)}.fatal-error p{font:600 10px DM Mono;letter-spacing:.16em;color:var(--green);margin:0}.fatal-error h1{font-size:30px;margin:0}.fatal-error span{max-width:620px;color:var(--muted);line-height:1.6}.fatal-error button{border:0;border-radius:8px;background:var(--green);color:#fff;padding:11px 16px;font-weight:700}
 .health-score small{color:#8ca099}
 .btn.xl span{background:#064d39;color:#fff}

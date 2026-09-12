@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createDemoState } from "../data/demoData";
 import { buildMorningPlan, evaluateCandidate } from "../lib/optimizer";
-import { assignCandidate, unassignLoad } from "../lib/stateTransitions";
+import { assignCandidate, transitionDriverAssignment, unassignLoad } from "../lib/stateTransitions";
 import { isDispatchState } from "../lib/stateValidation";
 import { updateGeofenceVisits } from "../lib/geofencing";
 import type {
@@ -9,7 +9,9 @@ import type {
   DecisionRecord,
   DispatchCandidate,
   DispatchState,
+  DriverAssignmentAction,
   OptimizationWeights,
+  OrganizationRole,
   PlanProposal,
 } from "../types";
 import type { BackhaulSuggestion, OperationalException, ReplanImpact } from "../../intelligence/types";
@@ -33,6 +35,9 @@ export function useDispatchOperations() {
   const [proposal, setProposal] = useState<PlanProposal | null>(null);
   const [simulationRunning, setSimulationRunning] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [memberRole, setMemberRole] = useState<OrganizationRole | null>(null);
+  const [driverId, setDriverId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<
     "local" | "connecting" | "synced" | "conflict" | "error"
   >("local");
@@ -69,6 +74,9 @@ export function useDispatchOperations() {
       lastSyncedState.current = null;
       snapshotRevision.current = 0;
       persistedDecisionIds.current.clear();
+      setMemberRole(null);
+      setDriverId(null);
+      setActionError(null);
       setSyncStatus("local");
       if (leavingCloudWorkspace) setState(createDemoState());
       return;
@@ -80,7 +88,7 @@ export function useDispatchOperations() {
     const connect = async () => {
       const { data: membership, error: membershipError } = await client
         .from("organization_members")
-        .select("organization_id")
+        .select("organization_id, role")
         .limit(1)
         .maybeSingle();
       if (!active) return;
@@ -89,7 +97,27 @@ export function useDispatchOperations() {
         return;
       }
       const orgId = Number(membership.organization_id);
+      const role = membership.role as OrganizationRole;
       organizationId.current = orgId;
+      setMemberRole(role);
+      if (role === "driver") {
+        const { data: link, error: linkError } = await client
+          .from("driver_user_links")
+          .select("driver_external_id")
+          .eq("organization_id", orgId)
+          .maybeSingle();
+        if (!active) return;
+        if (linkError || !link?.driver_external_id) {
+          setDriverId(null);
+          setActionError("Your account is a driver but has not been linked to a fleet driver profile. Ask an administrator to complete the link.");
+        } else {
+          setDriverId(String(link.driver_external_id));
+          setActionError(null);
+        }
+      } else {
+        setDriverId(null);
+        setActionError(null);
+      }
       const { data: snapshot, error } = await client
         .from("dispatch_snapshots")
         .select("state, revision")
@@ -109,6 +137,11 @@ export function useDispatchOperations() {
         snapshotRevision.current = Number(snapshot.revision ?? 0);
         setState(snapshot.state);
       } else {
+        if (role !== "admin" && role !== "dispatcher") {
+          setSyncStatus("error");
+          setActionError("An administrator must initialize this organization workspace before read-only or driver accounts can use it.");
+          return;
+        }
         const { error: insertError } = await client
           .from("dispatch_snapshots")
           .insert({ organization_id: orgId, state: stateRef.current });
@@ -170,7 +203,7 @@ export function useDispatchOperations() {
   }, [userEmail]);
 
   useEffect(() => {
-    if (!supabase || !syncReady.current || !organizationId.current) return;
+    if (!supabase || !syncReady.current || !organizationId.current || (userEmail && memberRole !== "admin" && memberRole !== "dispatcher")) return;
     const serialized = JSON.stringify(state);
     if (serialized === lastSyncedState.current) return;
     const client = supabase;
@@ -190,10 +223,10 @@ export function useDispatchOperations() {
       }
     }, 600);
     return () => window.clearTimeout(timer);
-  }, [state]);
+  }, [state, memberRole, userEmail]);
 
   useEffect(() => {
-    if (!supabase || !syncReady.current || !organizationId.current) return;
+    if (!supabase || !syncReady.current || !organizationId.current || (memberRole !== "admin" && memberRole !== "dispatcher")) return;
     const unsaved = (state.decisionLog ?? []).filter((item) => !persistedDecisionIds.current.has(item.id));
     if (!unsaved.length) return;
     const client = supabase;
@@ -212,7 +245,9 @@ export function useDispatchOperations() {
       if (error) { setSyncStatus("error"); return; }
       unsaved.forEach((item) => persistedDecisionIds.current.add(item.id));
     })();
-  }, [state.decisionLog]);
+  }, [state.decisionLog, memberRole]);
+
+  const canManageDispatch = !userEmail || memberRole === "admin" || memberRole === "dispatcher";
 
   const candidateFor = useCallback(
     (loadId: string, driverId: string): DispatchCandidate | null => {
@@ -234,24 +269,30 @@ export function useDispatchOperations() {
       candidate: DispatchCandidate,
       status: Assignment["status"] = "dispatched",
     ) => {
-      if (!candidate.feasible) return false;
+      if (!candidate.feasible || !canManageDispatch) return false;
       setState((current) => assignCandidate(current, candidate, status));
       return true;
     },
-    [],
+    [canManageDispatch],
   );
 
   const unassign = useCallback(
-    (loadId: string) => setState((current) => unassignLoad(current, loadId)),
-    [],
+    (loadId: string) => {
+      if (!canManageDispatch) return;
+      setState((current) => unassignLoad(current, loadId));
+    },
+    [canManageDispatch],
   );
 
   const generatePlan = useCallback(
-    () => setProposal(buildMorningPlan(state.loads, state.drivers, state.trailers, state.trucks, state.optimizationWeights)),
-    [state],
+    () => {
+      if (!canManageDispatch) return;
+      setProposal(buildMorningPlan(state.loads, state.drivers, state.trailers, state.trucks, state.optimizationWeights));
+    },
+    [state, canManageDispatch],
   );
   const applyPlan = useCallback(() => {
-    if (!proposal) return;
+    if (!proposal || !canManageDispatch) return;
     proposal.candidates.forEach((item) => assign(item, "proposed"));
     setState((current) => ({
       ...current,
@@ -264,23 +305,31 @@ export function useDispatchOperations() {
       } satisfies DecisionRecord)].slice(-500),
     }));
     setProposal(null);
-  }, [proposal, assign]);
+  }, [proposal, assign, canManageDispatch]);
 
-  const recordDecision = useCallback((record: DecisionRecord) => setState((current) => ({
+  const recordDecision = useCallback((record: DecisionRecord) => {
+    if (!canManageDispatch) return;
+    setState((current) => ({
     ...current,
     decisionLog: [...(current.decisionLog ?? []).filter((item) => item.id !== record.id), record].slice(-500),
-  })), []);
+    }));
+  }, [canManageDispatch]);
 
-  const acknowledgeException = useCallback((exception: OperationalException) => setState((current) => ({
+  const acknowledgeException = useCallback((exception: OperationalException) => {
+    if (!canManageDispatch) return;
+    setState((current) => ({
     ...current,
     acknowledgedExceptionIds: [...new Set([...(current.acknowledgedExceptionIds ?? []), exception.id])],
     decisionLog: [...(current.decisionLog ?? []), ({
       id: `${exception.id}:acknowledged`, kind: "exception", outcome: "acknowledged",
       createdAt: new Date().toISOString(), summary: `Acknowledged: ${exception.title}`,
     } satisfies DecisionRecord)].slice(-500),
-  })), []);
+    }));
+  }, [canManageDispatch]);
 
-  const resolveReplan = useCallback((impact: ReplanImpact, outcome: "accepted" | "rejected") => setState((current) => ({
+  const resolveReplan = useCallback((impact: ReplanImpact, outcome: "accepted" | "rejected") => {
+    if (!canManageDispatch) return;
+    setState((current) => ({
     ...current,
     assignments: outcome === "accepted" ? current.assignments.map((item) =>
       item.id === impact.assignmentId ? { ...item, eta: impact.projectedEta } : item,
@@ -290,7 +339,8 @@ export function useDispatchOperations() {
       createdAt: new Date().toISOString(),
       summary: `${outcome === "accepted" ? "Approved" : "Rejected"} ${impact.addedDelayMinutes}-minute ETA re-plan for ${impact.loadId}`,
     } satisfies DecisionRecord)].slice(-500),
-  })), []);
+    }));
+  }, [canManageDispatch]);
 
   const resolveBackhaul = useCallback((suggestion: BackhaulSuggestion, outcome: "accepted" | "rejected") => recordDecision({
     id: `${suggestion.id}:${outcome}`, kind: "backhaul", outcome,
@@ -298,8 +348,10 @@ export function useDispatchOperations() {
     summary: `${outcome === "accepted" ? "Reserved" : "Dismissed"} ${suggestion.loadId} after ${suggestion.assignmentId} (${Math.round(suggestion.avoidedEmptyKm)} km opportunity)`,
   }), [recordDecision]);
 
-  const setOptimizationWeights = useCallback((optimizationWeights: OptimizationWeights) =>
-    setState((current) => ({ ...current, optimizationWeights })), []);
+  const setOptimizationWeights = useCallback((optimizationWeights: OptimizationWeights) => {
+    if (!canManageDispatch) return;
+    setState((current) => ({ ...current, optimizationWeights }));
+  }, [canManageDispatch]);
 
   const reloadCloud = useCallback(async () => {
     if (!supabase || !organizationId.current) return;
@@ -318,48 +370,56 @@ export function useDispatchOperations() {
   ) => {
     if (!supabase || !organizationId.current)
       return "Available locally; sign in to persist this record to Supabase.";
+    if (!canManageDispatch) return "Your account does not have permission to save this record.";
     const payload = { ...values, organization_id: organizationId.current };
     const { error } = table === "cargo_items"
       ? await supabase.from(table).upsert(payload, { onConflict: "organization_id,external_id" })
       : await supabase.from(table).insert(payload);
     if (error) { setSyncStatus("error"); return error.message; }
     return null;
-  }, []);
+  }, [canManageDispatch]);
 
-  const updateAssignmentStatus = useCallback(
-    (assignmentId: string, status: Assignment["status"]) =>
-      setState((current) => ({
-        ...current,
-        assignments: current.assignments.map((item) =>
-          item.id === assignmentId
-            ? {
-                ...item,
-                status,
-                acceptedAt:
-                  status === "accepted"
-                    ? new Date().toISOString()
-                    : item.acceptedAt,
-              }
-            : item,
-        ),
-        loads: current.loads.map((load) => {
-          const assignment = current.assignments.find(
-            (item) => item.id === assignmentId,
-          );
-          if (!assignment || load.id !== assignment.loadId) return load;
-          return {
-            ...load,
-            status:
-              status === "in_transit"
-                ? "in_transit"
-                : status === "completed"
-                  ? "completed"
-                  : "assigned",
-          };
-        }),
-      })),
-    [],
-  );
+  const updateAssignmentStatus = useCallback(async (
+    assignmentId: string,
+    action: DriverAssignmentAction,
+  ) => {
+    setActionError(null);
+    if (userEmail && memberRole === "driver") {
+      if (!supabase || !driverId) {
+        setActionError("This driver account is not linked to a RoadStar driver profile.");
+        return false;
+      }
+      const { data, error } = await supabase.rpc("transition_driver_assignment", {
+        p_assignment_id: assignmentId,
+        p_action: action,
+      });
+      if (error) {
+        setActionError(error.message);
+        return false;
+      }
+      const result = data as { state?: unknown; revision?: unknown } | null;
+      if (!result || !isDispatchState(result.state)) {
+        setActionError("The cloud returned an invalid workspace update. Reload and try again.");
+        return false;
+      }
+      const serialized = JSON.stringify(result.state);
+      snapshotRevision.current = Number(result.revision ?? snapshotRevision.current);
+      lastSyncedState.current = serialized;
+      setState(result.state);
+      setSyncStatus("synced");
+      return true;
+    }
+    if (userEmail && !canManageDispatch) {
+      setActionError("Your account does not have permission to change assignments.");
+      return false;
+    }
+    const targetDriverId = stateRef.current.assignments.find((item) => item.id === assignmentId)?.driverId;
+    if (!targetDriverId) return false;
+    const next = transitionDriverAssignment(stateRef.current, assignmentId, targetDriverId, action);
+    if (next === stateRef.current) return false;
+    setState(next);
+    return true;
+  }, [userEmail, memberRole, driverId, canManageDispatch]);
 
   useEffect(() => {
     if (!simulationRunning) {
@@ -671,6 +731,10 @@ export function useDispatchOperations() {
     simulationRunning,
     setSimulationRunning,
     userEmail,
+    memberRole,
+    driverId,
+    canManageDispatch,
+    actionError,
     syncStatus,
     sendMagicLink,
     signOut,

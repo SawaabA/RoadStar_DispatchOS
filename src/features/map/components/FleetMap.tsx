@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as maplibregl from "maplibre-gl";
 import type { GeoJSONSource, Map as MapInstance } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -9,6 +9,7 @@ import type {
   TruckAsset,
 } from "../../dispatch/types";
 import type { RoadIncident } from "../../intelligence/types";
+import { fetchRoadRoute } from "../lib/routingProvider";
 
 type Props = {
   trucks: TruckAsset[];
@@ -52,6 +53,22 @@ export function FleetMap({
   const container = useRef<HTMLDivElement>(null),
     map = useRef<MapInstance | null>(null),
     markers = useRef<maplibregl.Marker[]>([]);
+  const [roadRoutes, setRoadRoutes] = useState<Record<string, Array<[number, number]>>>({});
+  const routeRequests = useMemo(() => assignments.flatMap((assignment) => {
+    const load = loads.find((item) => item.id === assignment.loadId);
+    return load ? [{ id: assignment.id, origin: load.originPoint, destination: load.destinationPoint }] : [];
+  }), [assignments.map((item) => `${item.id}:${item.loadId}`).join("|"), loads.map((item) => `${item.id}:${item.originPoint.lng}:${item.originPoint.lat}:${item.destinationPoint.lng}:${item.destinationPoint.lat}`).join("|")]);
+  useEffect(() => {
+    const controller = new AbortController();
+    void Promise.all(routeRequests.map(async (request) => ({
+      id: request.id,
+      route: await fetchRoadRoute(request.origin, request.destination, controller.signal),
+    }))).then((results) => {
+      if (controller.signal.aborted) return;
+      setRoadRoutes(Object.fromEntries(results.filter((item) => item.route).map((item) => [item.id, item.route!.coordinates])));
+    });
+    return () => controller.abort();
+  }, [routeRequests]);
   useEffect(() => {
     if (!container.current) return;
     const instance = new maplibregl.Map({
@@ -117,18 +134,16 @@ export function FleetMap({
     const features = assignments.flatMap((a) => {
       const load = loads.find((l) => l.id === a.loadId);
       if (!load) return [];
+      const roadRoute = roadRoutes[a.id];
       return [{
         type: "Feature" as const,
         properties: { id: a.id },
         geometry: {
           type: "LineString" as const,
-          coordinates: [
-            ...(a.breadcrumbs || [load.originPoint]).map((position) => [
-              position.lng,
-              position.lat,
-            ]),
-            [a.currentPoint.lng, a.currentPoint.lat],
-            [load.destinationPoint.lng, load.destinationPoint.lat],
+          coordinates: roadRoute ?? [
+            ...(a.breadcrumbs || [load.originPoint]).map((position) => [position.lng, position.lat] as [number, number]),
+            [a.currentPoint.lng, a.currentPoint.lat] as [number, number],
+            [load.destinationPoint.lng, load.destinationPoint.lat] as [number, number],
           ],
         },
       }];
@@ -168,6 +183,11 @@ export function FleetMap({
     satellite,
     incidents,
     onSelectIncident,
+    roadRoutes,
   ]);
-  return <div className="fleet-map" ref={container} />;
+  const routedCount = Object.keys(roadRoutes).length;
+  return <div className="fleet-map-shell" role="region" aria-label={`Fleet map with ${trucks.length} trucks, ${incidents.length} incidents, and ${routedCount} provider-routed movements. ${assignments.length - routedCount} movements use presentation geometry.`}>
+    <div className="fleet-map" ref={container} />
+    <span className={`route-mode ${routedCount ? "live" : "fallback"}`}>{routedCount ? "ROAD-ROUTED" : "PRESENTATION ROUTE"}</span>
+  </div>;
 }
