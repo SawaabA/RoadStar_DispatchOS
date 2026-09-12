@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "predev:full": "powershell -ExecutionPolicy Bypass -File scripts/free-dev-ports.ps1",
-    "dev:full": "concurrently -k -n SOLVER,SIM,INTEGRATIONS,WEB -c yellow,cyan,magenta,green \"npm:solver\" \"npm:simulator\" \"npm:integrations\" \"npm:dev\"",
-    "solver": "powershell -ExecutionPolicy Bypass -File services/loading-solver/run.ps1",
+    "predev:full": "node scripts/free-dev-ports.mjs",
+    "dev:full": "concurrently --kill-others-on-fail -n SOLVER,SIM,INTEGRATIONS,WEB -c yellow,cyan,magenta,green \"npm:solver\" \"npm:simulator\" \"npm:integrations\" \"npm:dev\"",
+    "solver": "node services/loading-solver/run.mjs",
     "simulator": "node services/telematics-simulator/server.mjs",
     "integrations": "node services/integration-gateway/server.mjs",
     "start": "node services/web-server/server.mjs",
@@ -15,7 +15,8 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "preview": "vite preview",
-    "quality": "powershell -ExecutionPolicy Bypass -File scripts/run-quality-gate.ps1"
+    "quality": "node scripts/run-quality-gate.mjs",
+    "solver:build": "node services/loading-solver/build.mjs"
   },
   "dependencies": {
     "@react-three/drei": "10.7.8",

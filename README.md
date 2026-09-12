@@ -4,11 +4,13 @@ RoadStar DispatchOS is a unified Southern Ontario dispatch workspace. It combine
 
 ## Run the application
 
-Requirements: Node.js 22+, Java 21+ for the xflp sidecar, and a Supabase project for cloud synchronization.
+Requirements: Node.js 22+ and a Supabase project for cloud synchronization. A JDK 17+ is optional: it enables the xflp loading solver, and without one the app falls back to the browser load planner.
 
-```powershell
+Every script is plain Node and runs on Linux, macOS, and Windows. The solver finds a JDK through `JAVA_HOME`, then `PATH`, then the platform's standard install locations, so a JDK that was never added to `PATH` still works.
+
+```bash
 npm install
-Copy-Item .env.example .env.local
+cp .env.example .env.local   # Windows: copy .env.example .env.local
 npm run dev:full
 ```
 
@@ -29,7 +31,7 @@ Never expose a Supabase secret or service-role key through a `VITE_` variable.
 
 Migrations live in `supabase/migrations` and are forward-only. The P1 migration adds traffic, optimization, decision, replay, provider, irregular-cargo, and revision-checked snapshot records. Apply them through a linked Supabase CLI:
 
-```powershell
+```bash
 npx supabase login
 npx supabase link --project-ref YOUR_PROJECT_REF
 npx supabase migration list
@@ -40,10 +42,10 @@ Signed-out visitors use a deterministic local demo. Selecting the user menu send
 
 ## Commands
 
-```powershell
+```bash
 npm run dev          # Vite web app
 npm run simulator    # independent SSE telemetry provider on :7071
-npm run solver       # xflp Java service on :7070
+npm run solver       # xflp Java service on :7070 (skipped if no JDK is found)
 npm run dev:full     # all four development services
 npm test             # dispatch constraint tests
 npm run test:e2e     # Chrome workflow and accessibility tests
