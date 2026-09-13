@@ -1,0 +1,18 @@
+[Unit]
+Description=RoadStar DispatchOS production health check
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=deploy
+Group=deploy
+Environment=ROADSTAR_ORIGIN=https://roadstardispatch.xyz
+ExecStart=/opt/roadstar/monitor-roadstar.sh /opt/roadstar
+
+# The probe only reads Compose state and calls the public readiness endpoint.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+

@@ -88,7 +88,7 @@ async function visibleOrganizations(profile, supabase, organizationId) {
 }
 
 async function tenantTables(profile, supabase, organizationId) {
-  for (const table of ["dispatch_snapshots", "drivers", "loads", "decision_records"]) {
+  for (const table of ["dispatch_snapshots", "drivers", "loads", "decision_records", "loading_plans", "load_documents"]) {
     const own = await supabase
       .from(table)
       .select("organization_id", { count: "exact", head: true })

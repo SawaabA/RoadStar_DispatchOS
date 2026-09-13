@@ -61,6 +61,30 @@ afterEach(async () => {
 });
 
 describe("integration gateway routing readiness", () => {
+  test("labels local ELD telemetry as demo rather than a live vendor", async () => {
+    const unavailablePort = await unusedPort();
+    const gatewayPort = await unusedPort();
+    startGateway(gatewayPort, `http://127.0.0.1:${unavailablePort}`);
+    await readyResponse(gatewayPort);
+
+    const response = await fetch(`http://127.0.0.1:${gatewayPort}/api/integrations/health`);
+    const payload = await response.json();
+    expect(payload.providers).toContainEqual(expect.objectContaining({ id: "eld", status: "demo", provider: "RoadStar telemetry simulator" }));
+  });
+
+  test("exposes clearly labelled read-only vendor-neutral TMS samples", async () => {
+    const unavailablePort = await unusedPort();
+    const gatewayPort = await unusedPort();
+    startGateway(gatewayPort, `http://127.0.0.1:${unavailablePort}`);
+    await readyResponse(gatewayPort);
+
+    const response = await fetch(`http://127.0.0.1:${gatewayPort}/api/tms/loads`);
+    const payload = await response.json();
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({ source: "roadstar-neutral-demo", mode: "demo" });
+    expect(payload.loads).toHaveLength(3);
+  });
+
   test("reports ready only after OSRM answers a nearest probe", async () => {
     const osrm = createServer((request, response) => {
       if (request.url?.startsWith("/nearest/v1/driving/")) {
@@ -77,6 +101,52 @@ describe("integration gateway routing readiness", () => {
     const response = await readyResponse(gatewayPort);
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ status: "ready", routing: { status: "connected" } });
+  });
+
+  test("normalizes OSRM road geometry, distance, and duration", async () => {
+    const osrm = createServer((request, response) => {
+      if (request.url?.startsWith("/nearest/v1/driving/")) {
+        response.writeHead(200, { "Content-Type": "application/json" });
+        response.end(JSON.stringify({ code: "Ok", waypoints: [{ name: "Road" }] }));
+      } else if (request.url?.startsWith("/route/v1/driving/")) {
+        response.writeHead(200, { "Content-Type": "application/json" });
+        response.end(JSON.stringify({ code: "Ok", routes: [{ distance: 71500, duration: 3900, geometry: { coordinates: [[-79.38, 43.65], [-79.55, 43.58], [-79.72, 43.43], [-79.87, 43.25]] } }] }));
+      } else response.writeHead(404).end();
+    });
+    const osrmPort = await listen(osrm);
+    const gatewayPort = await unusedPort();
+    startGateway(gatewayPort, `http://127.0.0.1:${osrmPort}`);
+    await readyResponse(gatewayPort);
+    const response = await fetch(`http://127.0.0.1:${gatewayPort}/api/routing/route?origin=-79.38,43.65&destination=-79.87,43.25`);
+    expect(await response.json()).toMatchObject({ source: "Test OSRM", distanceKm: 71.5, durationMinutes: 65, coordinates: expect.any(Array) });
+  });
+
+  test("rejects malformed coordinate input before calling OSRM", async () => {
+    const unavailablePort = await unusedPort();
+    const gatewayPort = await unusedPort();
+    startGateway(gatewayPort, `http://127.0.0.1:${unavailablePort}`);
+    await readyResponse(gatewayPort);
+    const response = await fetch(`http://127.0.0.1:${gatewayPort}/api/routing/route?origin=nope&destination=-79.87,43.25`);
+    expect(response.status).toBe(400);
+  });
+
+  test("falls back safely when a routing provider returns unusable metrics", async () => {
+    const osrm = createServer((request, response) => {
+      if (request.url?.startsWith("/nearest/v1/driving/")) {
+        response.writeHead(200, { "Content-Type": "application/json" });
+        response.end(JSON.stringify({ code: "Ok", waypoints: [{ name: "Road" }] }));
+      } else {
+        response.writeHead(200, { "Content-Type": "application/json" });
+        response.end(JSON.stringify({ code: "Ok", routes: [{ distance: null, duration: -1, geometry: { coordinates: [[-79.38, 43.65]] } }] }));
+      }
+    });
+    const osrmPort = await listen(osrm);
+    const gatewayPort = await unusedPort();
+    startGateway(gatewayPort, `http://127.0.0.1:${osrmPort}`);
+    await readyResponse(gatewayPort);
+
+    const response = await fetch(`http://127.0.0.1:${gatewayPort}/api/routing/route?origin=-79.38,43.65&destination=-79.87,43.25`);
+    expect(await response.json()).toMatchObject({ source: "presentation-fallback", fallback: true });
   });
 
   test("reports not ready when required OSRM is unreachable", async () => {

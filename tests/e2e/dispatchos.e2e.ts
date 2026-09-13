@@ -78,10 +78,63 @@ test("driver can start an accepted route", async ({ page }) => {
 
 test("3D planner validates numeric shipment input", async ({ page }) => {
   await page.getByRole("button", { name: "3D load planner", exact: true }).click();
-  const pallets = page.getByLabel("PALLETS").first();
+  const pallets = page.getByLabel("QTY").first();
   await pallets.fill("0");
-  await page.getByRole("button", { name: "Regenerate plan" }).click();
+  await page.getByRole("button", { name: "Optimize trailer" }).click();
   await expect(page.getByRole("alert")).toContainText("at least one pallet");
+});
+
+test("dispatcher creates a mixed-cargo load and imports it into the 3D planner", async ({ page }) => {
+  await page.getByRole("button", { name: /^Load board/ }).click();
+  await page.getByRole("button", { name: "Advanced cargo load" }).click();
+  const dialog = page.getByRole("dialog", { name: "Create a dispatch-ready load" });
+  await dialog.getByLabel("CUSTOMER").fill("QA Components");
+  await dialog.getByLabel("DESCRIPTION").fill("Mixed cargo acceptance journey");
+  await dialog.getByLabel("RATE (CAD)").fill("2200");
+  await dialog.getByRole("button", { name: "Continue to cargo" }).click();
+  await dialog.getByRole("button", { name: "Add cargo type" }).click();
+  await dialog.getByLabel("NAME").nth(1).fill("Forklift attachment");
+  await dialog.getByLabel("LENGTH (IN)").nth(1).fill("72");
+  await dialog.getByLabel("WIDTH (IN)").nth(1).fill("48");
+  await dialog.getByLabel("HEIGHT (IN)").nth(1).fill("36");
+  await dialog.getByLabel("UNIT LB").nth(1).fill("1800");
+  await dialog.getByRole("button", { name: "Create load" }).click();
+  await expect(page.getByText(/was created and is ready for dispatch/)).toBeVisible();
+  await page.getByRole("button", { name: "3D load planner", exact: true }).click();
+  await page.getByRole("button", { name: /Import .* active dispatch loads/ }).click();
+  await expect(page.getByText("Forklift attachment", { exact: true })).toBeVisible();
+});
+
+test("dispatcher can edit, duplicate, cancel, archive, and restore a load", async ({ page }) => {
+  await page.getByRole("button", { name: /^Load board/ }).click();
+  await page.getByRole("button", { name: "Advanced cargo load" }).click();
+  let dialog = page.getByRole("dialog", { name: "Create a dispatch-ready load" });
+  const originalBill = await dialog.getByLabel("LOAD NUMBER").inputValue();
+  await dialog.getByLabel("CUSTOMER").fill("Lifecycle QA");
+  await dialog.getByLabel("DESCRIPTION").fill("Lifecycle acceptance test");
+  await dialog.getByLabel("RATE (CAD)").fill("900");
+  await dialog.getByRole("button", { name: "Continue to cargo" }).click();
+  await dialog.getByRole("button", { name: "Create load" }).click();
+
+  const originalRow = page.getByRole("row").filter({ hasText: originalBill });
+  await originalRow.getByRole("button", { name: "Edit" }).click();
+  dialog = page.getByRole("dialog", { name: "Edit dispatch load" });
+  const revisedBill = `${originalBill}-R`;
+  await dialog.getByLabel("LOAD NUMBER").fill(revisedBill);
+  await dialog.getByRole("button", { name: "Continue to cargo" }).click();
+  await dialog.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByText(`${revisedBill} changes was created and is ready for dispatch.`)).toBeVisible();
+
+  const revisedRow = page.getByRole("row").filter({ hasText: revisedBill });
+  await revisedRow.getByRole("button", { name: "Duplicate" }).click();
+  const copyBill = `${revisedBill}-COPY`;
+  const copyRow = page.getByRole("row").filter({ hasText: copyBill });
+  await copyRow.getByRole("button", { name: "Cancel" }).click();
+  await page.getByLabel("Filter loads by status").selectOption("all");
+  await copyRow.getByRole("button", { name: "Archive" }).click();
+  await expect(copyRow).toContainText("archived");
+  await copyRow.getByRole("button", { name: "Restore" }).click();
+  await expect(copyRow).toContainText("unassigned");
 });
 
 test("global search, map style, and detention evidence controls work", async ({
@@ -222,10 +275,10 @@ test("historical replay labels opportunity rather than guaranteed savings", asyn
 
 test("irregular cargo estimates pallet displacement and reaches the 3D plan", async ({ page }) => {
   await page.getByRole("button", { name: "3D load planner", exact: true }).click();
-  await page.getByText("Add irregular cargo").click();
+  await page.getByText("Add cargo type", { exact: true }).click();
   await expect(page.getByText(/pallet positions forgone/)).toBeVisible();
-  await page.getByRole("button", { name: "Add to trailer plan" }).click();
-  await expect(page.locator("article").filter({ hasText: "Forklift" }).getByText("Forklift", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Regenerate plan" }).click();
-  await expect(page.getByText(/operator-entered dimensions/i)).toBeVisible();
+  await page.getByRole("button", { name: "Add to manifest" }).click();
+  await expect(page.getByText("Forklift", { exact: true }).first()).toBeVisible();
+  await page.getByRole("button", { name: "Optimize trailer" }).click();
+  await expect(page.getByText(/Estimated dimensions are marked/i)).toBeVisible();
 });

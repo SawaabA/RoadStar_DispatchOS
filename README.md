@@ -29,7 +29,7 @@ Never expose a Supabase secret or service-role key through a `VITE_` variable.
 
 ## Database
 
-Migrations live in `supabase/migrations` and are forward-only. The P1 migration adds traffic, optimization, decision, replay, provider, irregular-cargo, and revision-checked snapshot records. Apply them through a linked Supabase CLI:
+Migrations live in `supabase/migrations` and are forward-only. They cover traffic, optimization, decision/replay records, provider and irregular-cargo data, revision-checked snapshots, versioned loading plans, and vendor-neutral synchronization contracts. Apply them through a linked Supabase CLI:
 
 ```bash
 npx supabase login
@@ -53,6 +53,8 @@ npm test             # dispatch constraint tests
 npm run test:e2e     # Chrome workflow and accessibility tests
 npm run build        # type-check and production bundle
 npm run quality      # full deterministic release gate
+npm run verify:auth  # real Supabase role and tenant boundaries (QA accounts)
+npm run verify:auth:workflow # realtime, driver actions, audit records and revision races
 npm start            # serve the built production app on :8080
 ```
 
