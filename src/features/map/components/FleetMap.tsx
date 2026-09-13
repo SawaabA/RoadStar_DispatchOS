@@ -10,6 +10,7 @@ import type {
 } from "../../dispatch/types";
 import type { RoadIncident } from "../../intelligence/types";
 import { fetchRoadRoute, type RoadRoute } from "../lib/routingProvider";
+import type { OperationalPoi } from "../data/operationalPois";
 
 type Props = {
   trucks: TruckAsset[];
@@ -21,6 +22,7 @@ type Props = {
   onSelectTruck?: (id: string) => void;
   incidents?: RoadIncident[];
   onSelectIncident?: (id: string) => void;
+  pointsOfInterest?: OperationalPoi[];
 };
 
 const roadStyle = {
@@ -62,6 +64,7 @@ export function FleetMap({
   onSelectTruck,
   incidents = [],
   onSelectIncident,
+  pointsOfInterest = [],
 }: Props) {
   const container = useRef<HTMLDivElement>(null),
     map = useRef<MapInstance | null>(null),
@@ -127,12 +130,41 @@ export function FleetMap({
       );
     }
     for (const facility of facilities) {
-      const el = document.createElement("div");
+      const el = document.createElement("button");
       el.className = "facility-marker";
-      el.title = facility.name;
+      el.title = `${facility.name} · RoadStar hub`;
+      el.setAttribute("aria-label", `${facility.name}, RoadStar hub in ${facility.city}`);
+      const content = document.createElement("div");
+      content.className = "poi-popup";
+      const name = document.createElement("strong");
+      name.textContent = facility.name;
+      const detail = document.createElement("span");
+      detail.textContent = `RoadStar hub · ${facility.city}`;
+      content.append(name, detail);
       markers.current.push(
         new maplibregl.Marker({ element: el })
           .setLngLat([facility.point.lng, facility.point.lat])
+          .setPopup(new maplibregl.Popup({ offset: 16 }).setDOMContent(content))
+          .addTo(map.current),
+      );
+    }
+    for (const poi of pointsOfInterest) {
+      const el = document.createElement("button");
+      el.className = `poi-marker ${poi.kind}`;
+      el.textContent = poi.kind === "truck-stop" ? "T" : "F";
+      el.title = poi.name;
+      el.setAttribute("aria-label", `${poi.name}, ${poi.kind.replace("-", " ")} in ${poi.city}`);
+      const content = document.createElement("div");
+      content.className = "poi-popup";
+      const name = document.createElement("strong");
+      name.textContent = poi.name;
+      const detail = document.createElement("span");
+      detail.textContent = `${poi.city} · ${poi.services.join(" · ")}`;
+      content.append(name, detail);
+      markers.current.push(
+        new maplibregl.Marker({ element: el })
+          .setLngLat([poi.point.lng, poi.point.lat])
+          .setPopup(new maplibregl.Popup({ offset: 18 }).setDOMContent(content))
           .addTo(map.current),
       );
     }
@@ -198,6 +230,7 @@ export function FleetMap({
     satellite,
     incidents,
     onSelectIncident,
+    pointsOfInterest,
     roadRoutes,
   ]);
   const routedCount = Object.keys(roadRoutes).length;

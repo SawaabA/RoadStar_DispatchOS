@@ -20,6 +20,7 @@ import type {
 } from "../features/dispatch/types";
 import { isSupabaseConfigured } from "../shared/lib/supabase";
 import { isAuthCallbackHash } from "../shared/lib/authCallback";
+import { operationalPois } from "../features/map/data/operationalPois";
 import "./styles.css";
 
 type View =
@@ -932,7 +933,8 @@ function FleetPage({ ops }: { ops: ReturnType<typeof useDispatchOperations> }) {
 function MapPage({ ops, intelligence }: { ops: ReturnType<typeof useDispatchOperations>; intelligence: ReturnType<typeof useRoadIntelligence> }) {
   const [sat, setSat] = useState(false),
     [truck, setTruck] = useState<string>(),
-    [incidentId, setIncidentId] = useState<string>();
+    [incidentId, setIncidentId] = useState<string>(),
+    [mapLayers, setMapLayers] = useState({ hubs: true, truckStops: true, fuelStations: true });
   const selected = ops.state.trucks.find((t) => t.id === truck),
     active = ops.state.assignments.find((a) => a.truckId === truck),
     incident = intelligence.traffic.incidents.find((item) => item.id === incidentId);
@@ -942,6 +944,11 @@ function MapPage({ ops, intelligence }: { ops: ReturnType<typeof useDispatchOper
         <div>
           <p className="kicker">TRACK & TRACE</p>
           <h1>Live fleet map</h1>
+        </div>
+        <div className="map-layer-toggles" aria-label="Map layers">
+          <button className={mapLayers.hubs ? "active hub" : "hub"} aria-pressed={mapLayers.hubs} onClick={() => setMapLayers((current) => ({ ...current, hubs: !current.hubs }))}><Warehouse /> Hubs</button>
+          <button className={mapLayers.truckStops ? "active truck-stop" : "truck-stop"} aria-pressed={mapLayers.truckStops} onClick={() => setMapLayers((current) => ({ ...current, truckStops: !current.truckStops }))}><Truck /> Truck stops</button>
+          <button className={mapLayers.fuelStations ? "active fuel-station" : "fuel-station"} aria-pressed={mapLayers.fuelStations} onClick={() => setMapLayers((current) => ({ ...current, fuelStations: !current.fuelStations }))}><CircleDollarSign /> Fuel</button>
         </div>
         <div className="segmented">
           <button
@@ -976,7 +983,8 @@ function MapPage({ ops, intelligence }: { ops: ReturnType<typeof useDispatchOper
             trucks={ops.state.trucks}
             assignments={ops.state.assignments}
             loads={ops.state.loads}
-            facilities={ops.state.facilities}
+            facilities={mapLayers.hubs ? ops.state.facilities.filter((facility) => facility.name.startsWith("RoadStar")) : []}
+            pointsOfInterest={operationalPois.filter((poi) => (poi.kind === "truck-stop" ? mapLayers.truckStops : mapLayers.fuelStations))}
             satellite={sat}
             selectedTruckId={truck}
             onSelectTruck={setTruck}
