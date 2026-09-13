@@ -5,6 +5,7 @@ const checks = [
   ['Unit and domain tests', 'npm', ['test']],
   ['Production type-check and bundle', 'npm', ['run', 'build']],
   ['Web gateway syntax', 'node', ['--check', 'services/web-server/server.mjs']],
+  ['Built assets served with executable types', 'node', ['scripts/check-served-assets.mjs']],
   ['Integration gateway syntax', 'node', ['--check', 'services/integration-gateway/server.mjs']],
   ['xflp sidecar compilation', 'node', ['services/loading-solver/build.mjs']],
   ['Browser journeys and accessibility', 'npm', ['run', 'test:e2e']],

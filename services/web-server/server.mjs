@@ -13,7 +13,9 @@ const targets = {
   telemetry: process.env.SIMULATOR_URL || "http://127.0.0.1:7071",
   solver: process.env.SOLVER_URL || "http://127.0.0.1:7070",
 };
-const mime = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon" };
+// Browsers enforce these types because of nosniff: a module script or worker
+// served as application/octet-stream is refused. The pdf.js worker is .mjs.
+const mime = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon" };
 const securityHeaders = {
   "X-Content-Type-Options": "nosniff",
   "Referrer-Policy": "strict-origin-when-cross-origin",

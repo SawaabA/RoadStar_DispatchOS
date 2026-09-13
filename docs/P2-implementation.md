@@ -72,13 +72,13 @@ Routes are registered in `server.mjs` (`aiRoutes`). POST is accepted only under 
 |---|---|---|---|
 | `/api/ai/copilot` | POST | admin, dispatcher, viewer | `handleCopilot` |
 | `/api/ai/extract` | POST | admin, dispatcher, driver (further narrowed per schema) | `handleExtract` |
-| `/api/ai/health` | GET | public | configured, model names, last call outcome; no secrets |
+| `/api/ai/health` | GET | public | `status` (`not_configured`, `configured`, `connected`, `degraded`), `keyConfigured`, `authConfigured`, `models`, `misconfigured` (non-sovereign model names), `lastCall`; no secrets and no live model call |
 
 `/api/integrations/health` also lists the AI provider.
 
 **Logging.** `ai_call` log lines carry only `requestId`, `model`, `outcome` (`ok`, `http_<status>`, `empty`, `timeout`, `network_error`), `providerError` (a fixed classification such as `context_window_exceeded`, never provider free text), latency and token counts. Prompts, document contents, answers and the key are never logged.
 
-**Error codes the browser may see:** `unauthenticated` (401), `forbidden` (403), `not_member`, `rate_limited` (429), `invalid_question`, `invalid_context`, `invalid_schema`, `invalid_input`, `invalid_document` (400), `payload_too_large`, `input_too_large` (413), `unsupported_type`, `render_pdf_in_browser` (415), `document_not_found` (404), `storage_unavailable`, `not_configured`, `model_not_allowed` (503). Model failures are **not** errors: both handlers return a `fallback: true` result instead.
+**Error codes the browser may see:** `unauthenticated` (401); `forbidden`, `no_membership` (403); `rate_limited` (429); `invalid_json`, `invalid_question`, `invalid_context`, `invalid_schema`, `invalid_input`, `invalid_document` (400); `payload_too_large`, `input_too_large` (413); `unsupported_type`, `render_pdf_in_browser` (415); `document_not_found` (404); `storage_unavailable`, `auth_not_configured`, `auth_unavailable`, `not_configured`, `model_not_allowed` (503). `provider_error` and `invalid_output` (502) are raised inside the handlers and normally converted into fallbacks. Model failures are **not** errors: both handlers return a `fallback: true` result instead.
 
 ### Timeouts
 
@@ -151,7 +151,7 @@ The table is in the Realtime publication; `useLoadDocuments` subscribes to it.
 
 ### POD capture flow
 
-1. **Driver page** (`PodCapture.tsx`, shown for the driver's assigned loads). The driver picks or takes a photo.
+1. **Driver page** (`PodCapture.tsx`, shown on the driver's assignments that are `accepted` or `in_transit`). The driver picks or takes a photo. The database also allows a POD for a completed assignment; the UI does not offer it yet.
 2. `uploadProofOfDelivery` (`src/features/documents/lib/documents.ts`) re-encodes the photo to fit the [vision budget](#vision-input-budget). A photo that cannot fit is stored at full size instead, so the proof is never lost.
 3. It uploads to `<org>/<loadId>/<uuid>.jpg`, then calls `attach_load_document`. The upload is durable before any AI runs.
 4. It posts `/api/ai/extract` with `{schema: "pod", storagePath, documentId}`. The gateway downloads the file **with the driver's token** (Storage policies apply), reads it with `spur-vision`, and writes the result through `record_load_document_extraction`.
@@ -244,7 +244,8 @@ Models resold through OpenRouter (`spur-gpt-5-5`, `spur-claude-*`, `spur-gemini-
 ## Operations
 
 - **Migrations are manual.** The deploy pipeline does not run them. Apply new SQL in the Supabase SQL editor **before** merging code that depends on it, then confirm `system_health.schema_version`. The anon role gets `permission denied` (not "not found") for `load_documents` once the migration is applied.
-- **Health.** `GET /api/ai/health` shows configured, model names and last call outcome. `/api/integrations/health` lists the AI provider next to the others.
+- **Health.** `GET /api/ai/health` returns `status`: `not_configured` (no key), `degraded` (auth not configured, a non-sovereign model configured, or the last call failed), `configured` (no call yet) or `connected`. `/api/integrations/health` lists the AI provider next to the others.
+- **Static asset types.** The web gateway sends `nosniff`, so every script type must be in its MIME map. The first P2 release served the pdf.js worker (`pdf.worker.min-*.mjs`) as `application/octet-stream`, which breaks PDF import in production while working under Vite. `.mjs` is now mapped, and the quality gate step `scripts/check-served-assets.mjs` serves `dist/` through the production gateway and fails on any script or stylesheet with a non-executable type.
 - **Logs.** Search the gateway logs for `ai_call`. `http_400` with `providerError: context_window_exceeded` means an image went over the budget. `timeout` means SPUR is slow and fallbacks were served.
 - **Symptoms.**
   - Copilot shows only facts: check `/api/ai/health` and `ai_call` outcomes.
@@ -255,15 +256,17 @@ Models resold through OpenRouter (`spur-gpt-5-5`, `spur-claude-*`, `spur-gemini-
 
 | Suite | Count | Covers |
 |---|---|---|
-| `tests/aiFoundation.test.ts` | 25 | auth, membership, roles, rate limit, body limit, allowlist, proxy header forwarding, log hygiene |
+| `tests/aiFoundation.test.ts` | 25 | key and allowlist checks, GLM parameters, provider failures and timeouts, log hygiene, auth and membership with the caller's token, session cache, roles, rate limit, body limit, readiness states, Authorization forwarded only to AI routes |
 | `tests/aiCopilot.test.ts` | 17 | validation (citations, identifiers, numbers, aliases), model fallback chain, cache, fallback response |
 | `tests/aiExtract.test.ts` | 21 | normalization, signature derivation, org path checks, caller-token download, PDF 415, fallback storage, cache, vision budget (request, stored file, provider refusal) |
-| `tests/loadDocumentsMigration.test.ts` | 6 | migration contract (RLS, grants, search_path, no update policy) |
+| `tests/loadDocumentsMigration.test.ts` | 6 | static contract checks on the migration SQL |
 | `copilotContext.test.ts`, `loadDraft.test.ts`, `intakeMapping.test.ts`, `documentExceptions.test.ts` | 7, 12, 10, 4 | deterministic browser logic |
 | `supabase/tests/load-documents` | scenarios | real Postgres, per-role access with pinned SQLSTATEs |
 | `tests/e2e/dispatchos.e2e.ts` | 13 journeys | P2 adds: copilot fallback facts, document features ask signed-out users to sign in, load creation, document reader (text PDF, scanned PDF, over-budget photo) |
 
 The gateway tests spawn the real gateway against fake SPUR and Supabase HTTP servers. New guards were **mutation-tested**: each guard was disabled in turn, and the matching test had to fail (the vision budget mutants M1–M4 are all caught).
+
+Browser journeys run against the Vite dev server, which does not reproduce production headers. The quality gate therefore also runs `scripts/check-served-assets.mjs` after the build (it caught the `.mjs` type bug when that entry was removed).
 
 Fixtures live in `tests/fixtures/`: `rate-confirmation-text.pdf` (hand-written text layer), `rate-confirmation-scan.pdf` (image only) and `rate-confirmation-photo.jpg` (98 KB, deliberately over the budget before encoding).
 
@@ -282,7 +285,8 @@ services/integration-gateway/ai.mjs            shared AI plumbing (auth, roles, 
 services/integration-gateway/copilot.mjs       copilot handler and answer validation
 services/integration-gateway/extract.mjs       extraction schemas, normalization, storage download, vision budget
 services/integration-gateway/server.mjs        /api/ai routes and health
-services/web-server/server.mjs                 /api/ai proxy: Authorization forwarding, 45 s timeout
+services/web-server/server.mjs                 /api/ai proxy: Authorization forwarding, 45 s timeout; .mjs MIME type
+scripts/check-served-assets.mjs                release check: built scripts served with executable types
 src/shared/lib/aiClient.ts                     postAi with the Supabase session token; AiRequestError
 src/features/intelligence/lib/copilotContext.ts   deterministic copilot facts
 src/features/intelligence/components/CopilotPanel.tsx
