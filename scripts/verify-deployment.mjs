@@ -1,7 +1,8 @@
 const baseUrl = (process.env.ROADSTAR_BASE_URL || "http://127.0.0.1:8080").replace(/\/$/, "");
 const supabaseUrl = process.env.VITE_SUPABASE_URL?.replace(/\/$/, "");
 const supabaseKey = process.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-const expectedSchema = process.env.EXPECTED_SCHEMA_VERSION || "20260913055147";
+const expectedSchema = process.env.EXPECTED_SCHEMA_VERSION || "20260913090218";
+const requireRealRouting = process.env.ROADSTAR_REQUIRE_REAL_ROUTING === "true";
 let failed = false;
 
 async function check(name, operation) {
@@ -38,6 +39,46 @@ await check("integration status", async () => {
   return providers;
 });
 
+for (const [name, path] of [
+  ["solver", "/api/health"],
+  ["telemetry", "/api/telemetry/health"],
+  ["Ontario 511", "/api/traffic/health"],
+]) {
+  await check(`${name} service`, async () => {
+    const response = await fetch(`${baseUrl}${path}`, { signal: AbortSignal.timeout(15_000) });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  });
+}
+
+const routes = [
+  ["Toronto-Hamilton", "-79.3832,43.6532", "-79.8711,43.2557"],
+  ["London-Milton", "-81.2453,42.9849", "-79.8774,43.5183"],
+  ["Vaughan-Pickering", "-79.5085,43.8563", "-79.0868,43.8384"],
+  ["Toronto-Ottawa", "-79.3832,43.6532", "-75.6972,45.4215"],
+];
+for (const [name, origin, destination] of routes) {
+  await check(`road route ${name}`, async () => {
+    const response = await fetch(`${baseUrl}/api/routing/route?origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}`, { signal: AbortSignal.timeout(20_000) });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    if (requireRealRouting && (payload.fallback || payload.source === "presentation-fallback")) throw new Error("presentation-fallback returned while real routing is required");
+    if (!payload.fallback && (!(payload.distanceKm > 0) || !(payload.durationMinutes > 0) || !Array.isArray(payload.coordinates) || payload.coordinates.length < 5)) throw new Error("routing response lacks road geometry, distance, or duration");
+    return `${payload.source}${payload.distanceKm ? `, ${Math.round(payload.distanceKm)} km` : ""}`;
+  });
+}
+
+await check("routing rejects invalid coordinates", async () => {
+  const response = await fetch(`${baseUrl}/api/routing/route?origin=invalid&destination=-79.8,43.2`, { signal: AbortSignal.timeout(10_000) });
+  if (response.status !== 400) throw new Error(`expected HTTP 400, received ${response.status}`);
+});
+
+await check("routing handles a destination outside the Ontario graph", async () => {
+  const response = await fetch(`${baseUrl}/api/routing/route?origin=-79.3832,43.6532&destination=-123.1207,49.2827`, { signal: AbortSignal.timeout(20_000) });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const payload = await response.json();
+  if (!payload.fallback) throw new Error("expected a controlled fallback for a destination outside the Ontario graph");
+});
+
 if (!supabaseUrl || !supabaseKey) {
   failed = true;
   console.error("[FAIL] Supabase checks - VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY are required");
@@ -51,7 +92,7 @@ if (!supabaseUrl || !supabaseKey) {
     if (actual !== expectedSchema) throw new Error(`expected ${expectedSchema}, received ${actual || "none"}`);
     return actual;
   });
-  for (const table of ["dispatch_snapshots", "decision_records", "driver_user_links"]) {
+  for (const table of ["dispatch_snapshots", "decision_records", "driver_user_links", "loading_plans", "load_documents"]) {
     await check(`anonymous access denied: ${table}`, async () => {
       const response = await fetch(`${supabaseUrl}/rest/v1/${table}?select=*&limit=0`, { headers, signal: AbortSignal.timeout(10_000) });
       if (response.status !== 401 && response.status !== 403) throw new Error(`expected 401/403, received ${response.status}`);

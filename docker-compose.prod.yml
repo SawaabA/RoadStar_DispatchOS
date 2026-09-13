@@ -10,7 +10,8 @@ services:
     image: ${IMAGE_PREFIX:-ghcr.io/sawaaba/roadstar_dispatchos}-web:${IMAGE_TAG:-latest}
     environment:
       SOLVER_URL: http://solver:7070
-      SIMULATOR_URL: http://simulator:7071
+      # Replace this with a private ELD adapter URL when a vendor is selected.
+      SIMULATOR_URL: ${TELEMATICS_URL:-http://simulator:7071}
       INTEGRATION_URL: http://integrations:7072
     # Bound to loopback only. Caddy terminates TLS and is the sole way in.
     ports:
@@ -21,7 +22,13 @@ services:
       - integrations
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -49,6 +56,19 @@ services:
       INTEGRATION_HOST: 0.0.0.0
       # Must match the public origin or the browser's traffic calls are refused.
       APP_ORIGIN: ${APP_ORIGIN:-https://roadstardispatch.xyz}
+      NODE_ENV: production
+      ROUTING_PROVIDER: ${ROUTING_PROVIDER:-OSRM-compatible routing}
+      ROUTING_BASE_URL: ${ROUTING_BASE_URL:-}
+      ROUTING_API_TOKEN: ${ROUTING_API_TOKEN:-}
+      REQUIRE_ROUTING: ${REQUIRE_ROUTING:-false}
+      TMS_PROVIDER: ${TMS_PROVIDER:-RoadStar neutral demo adapter}
+      TMS_HEALTH_URL: ${TMS_HEALTH_URL:-}
+      TMS_API_TOKEN: ${TMS_API_TOKEN:-}
+      TMS_DEMO_MODE: ${TMS_DEMO_MODE:-true}
+      ELD_PROVIDER: ${ELD_PROVIDER:-RoadStar telemetry simulator}
+      ELD_HEALTH_URL: ${ELD_HEALTH_URL:-http://simulator:7071/api/telemetry/health}
+      ELD_API_TOKEN: ${ELD_API_TOKEN:-}
+      ELD_DEMO_MODE: ${ELD_DEMO_MODE:-true}
       SPUR_API_KEY: ${SPUR_API_KEY:-}
       SPUR_BASE_URL: ${SPUR_BASE_URL:-https://ai.spuric.com/v1}
       SPUR_MODEL_EXTRACT: ${SPUR_MODEL_EXTRACT:-spur-glm-5-2}

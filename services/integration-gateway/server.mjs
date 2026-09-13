@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
+import { normalizeTmsLoad } from "./tms-contract.mjs";
 import { aiMetrics, aiReadiness, AiError, authenticate, checkRateLimit, readJson, requireRole } from "./ai.mjs";
 import { handleCopilot } from "./copilot.mjs";
 import { handleExtract } from "./extract.mjs";
@@ -12,9 +13,14 @@ const trafficEndpoint = process.env.TRAFFIC_URL || "https://511on.ca/api/v2/get/
 const routingBaseUrl = process.env.ROUTING_BASE_URL?.replace(/\/$/, "") || "";
 const routingToken = process.env.ROUTING_API_TOKEN || "";
 const providerChecks = [
-  { id: "tms", label: process.env.TMS_PROVIDER || "TMS", url: process.env.TMS_HEALTH_URL, token: process.env.TMS_API_TOKEN },
-  { id: "eld", label: process.env.ELD_PROVIDER || "ELD / telematics", url: process.env.ELD_HEALTH_URL, token: process.env.ELD_API_TOKEN },
+  { id: "tms", label: process.env.TMS_PROVIDER || "RoadStar neutral demo adapter", url: process.env.TMS_HEALTH_URL, token: process.env.TMS_API_TOKEN, demo: process.env.TMS_DEMO_MODE !== "false" && !process.env.TMS_HEALTH_URL },
+  { id: "eld", label: process.env.ELD_PROVIDER || "RoadStar telemetry simulator", url: process.env.ELD_HEALTH_URL, token: process.env.ELD_API_TOKEN, demo: process.env.ELD_DEMO_MODE !== "false" && !process.env.ELD_HEALTH_URL },
 ];
+const demoTmsLoads = [
+  { externalId: "TMS-DEMO-1001", customer: "Maple Auto Parts", origin: "Windsor, ON", destination: "Brampton, ON", pickupAt: "2026-09-14T12:00:00Z", deliveryAt: "2026-09-14T18:30:00Z", equipment: "dry-van", pieces: 12, weightLbs: 22600, rateCad: 2450, status: "tendered" },
+  { externalId: "TMS-DEMO-1002", customer: "Northline Foods", origin: "London, ON", destination: "Ottawa, ON", pickupAt: "2026-09-14T14:00:00Z", deliveryAt: "2026-09-15T01:00:00Z", equipment: "reefer", pieces: 18, weightLbs: 31800, rateCad: 3180, status: "planned" },
+  { externalId: "TMS-DEMO-1003", customer: "Golden Horseshoe Machinery", origin: "Hamilton, ON", destination: "Kingston, ON", pickupAt: "2026-09-15T13:00:00Z", deliveryAt: "2026-09-15T20:00:00Z", equipment: "flatbed", pieces: 2, weightLbs: 17400, rateCad: 2875, status: "tendered" },
+].map(normalizeTmsLoad);
 const cacheMs = 60_000;
 let cache;
 let routingHealthCache;
@@ -98,11 +104,20 @@ async function getRoute(origin, destination) {
   if (!response.ok) throw new Error(`Routing provider returned ${response.status}`);
   const payload = await response.json();
   const route = payload?.routes?.[0];
-  if (!route || !Array.isArray(route.geometry?.coordinates)) throw new Error("Routing provider returned an invalid route");
-  return { source: process.env.ROUTING_PROVIDER || "OSRM-compatible", distanceKm: Number(route.distance) / 1000, durationMinutes: Number(route.duration) / 60, coordinates: route.geometry.coordinates };
+  const distanceKm = Number(route?.distance) / 1000;
+  const durationMinutes = Number(route?.duration) / 60;
+  const coordinates = route?.geometry?.coordinates;
+  const validCoordinates = Array.isArray(coordinates) && coordinates.length >= 2 && coordinates.every((point) =>
+    Array.isArray(point) && point.length >= 2 && Number.isFinite(Number(point[0])) && Number.isFinite(Number(point[1])) &&
+    Number(point[0]) >= -180 && Number(point[0]) <= 180 && Number(point[1]) >= -90 && Number(point[1]) <= 90);
+  if (!Number.isFinite(distanceKm) || distanceKm <= 0 || !Number.isFinite(durationMinutes) || durationMinutes <= 0 || !validCoordinates) {
+    throw new Error("Routing provider returned an invalid route");
+  }
+  return { source: process.env.ROUTING_PROVIDER || "OSRM-compatible", distanceKm, durationMinutes, coordinates };
 }
 
 async function checkExternalProvider(provider) {
+  if (provider.demo) return { id: provider.id, provider: provider.label, status: "demo" };
   if (!provider.url) return { id: provider.id, provider: provider.label, status: "not_configured" };
   try {
     const headers = provider.token ? { Authorization: `Bearer ${provider.token}` } : undefined;
@@ -194,6 +209,14 @@ const server = createServer(async (request, response) => {
       checkRoutingProvider(),
     ]);
     writeJson(response, 200, { status: "ok", checkedAt: new Date().toISOString(), providers: [...external, routing, { id: "traffic", provider: "Ontario 511", status: "connected" }, (({ id, provider, status }) => ({ id, provider, status }))(aiReadiness())] }, requestId, { "Cache-Control": "no-store" });
+    return;
+  }
+  if (url.pathname === "/api/tms/health") {
+    writeJson(response, 200, { status: "ok", provider: "roadstar-neutral-demo", mode: "demo", direction: "two-way-ready", authoritative: "roadstar-supabase", writable: false }, requestId, { "Cache-Control": "no-store" });
+    return;
+  }
+  if (url.pathname === "/api/tms/loads") {
+    writeJson(response, 200, { source: "roadstar-neutral-demo", mode: "demo", loads: demoTmsLoads }, requestId, { "Cache-Control": "no-store" });
     return;
   }
   if (url.pathname === "/api/traffic/incidents") {

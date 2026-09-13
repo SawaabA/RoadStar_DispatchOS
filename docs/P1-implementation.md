@@ -15,6 +15,9 @@ P1 turns the P0 operating picture into an approval-first decision system. Recomm
 | KPI/ROI dashboard | Live KPIs, historical distance, scenario comparison and top lanes | Browser journey and source reconciliation |
 | Integration adapters | TMS, telematics, routing, traffic, loading and database contracts with swap targets | Integration workspace |
 | Irregular cargo | Presets/custom dimensions, clearance, conservative pallet displacement and actual 3D protected geometry | Unit test, browser journey and Java compile |
+| Versioned load plans | Immutable plan versions, history/restore and one approved version per trailer workspace | Supabase RPC contract and planner UI |
+| Advanced trailer planning | Mixed dimensions, real stack layers, floor-bearing/fragility limits, four objectives, manual safe placement, locks, camera/layer/stop controls and unloading replay | Planner unit tests, xflp compile and browser journeys |
+| Load intake | Guided order/route/stops/cargo creation, edit/duplicate/cancel/archive controls and decision history | Validation tests and end-to-end import into the 3D planner |
 
 ## Supabase model
 
@@ -22,10 +25,13 @@ P1 turns the P0 operating picture into an approval-first decision system. Recomm
 
 `save_dispatch_snapshot` is a security-invoker compare-and-swap RPC. It only updates an authorized tenant row when the expected revision matches. A stale writer receives a non-retryable `P0001` application error with the revision-conflict message; the app preserves the edit, shows a conflict, and requires an explicit reload. Authorization failures use `42501` so they cannot be mistaken for concurrent edits.
 
+`20260913070240_support_load_creation_decisions.sql` extends decision logging for the load lifecycle. `20260913090218_loading_plan_versions_and_neutral_sync_contract.sql` upgrades the existing loading-plan table in place, adds atomic version/approval RPCs, cargo constraints, stable external-record links, append-only sync events and a private idempotent outbox. It deliberately preserves the original `loading_plan_items` foreign key and legacy plan rows.
+
 ## Honest boundaries
 
-- Ontario 511 supplies incidents. Production road-snapped routing still requires a contracted routing adapter.
+- Ontario 511 supplies incidents. An internal-only Ontario OSRM service, guarded preprocessing workflow and strict route verification are included; production remains on labelled presentation fallback until the graph is provisioned and `REQUIRE_REAL_ROUTING` is enabled.
 - Backhaul and replay kilometres are opportunities, not guaranteed savings.
-- HOS is planning guidance, not a certified ELD.
+- HOS is planning guidance, not a certified ELD. Demo telemetry is explicitly labelled; a real vendor adapter remains a deployment input.
+- TMS samples are read-only and explicitly labelled demo. The schema provides stable IDs, idempotency and an outbox, but real two-way sync waits for vendor documentation and sandbox credentials.
 - Docker configuration is included but could not run on the development machine because Docker is not installed.
-- The migration cannot be pushed until the Supabase CLI is authenticated and linked; a publishable browser key cannot perform schema administration.
+- The two latest migrations cannot be pushed from this workstation until the Supabase CLI is authenticated and linked; a publishable browser key cannot perform schema administration.
