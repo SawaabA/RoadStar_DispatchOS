@@ -9,7 +9,7 @@ services:
         condition: service_healthy
 
   osrm:
-    image: ghcr.io/project-osrm/osrm-backend:v26.9.0
+    image: ghcr.io/project-osrm/osrm-backend:v26.9.0-debian
     command: ["osrm-routed", "--algorithm", "mld", "/data/ontario-latest.osrm"]
     volumes:
       - ./deploy/osrm/data:/data:ro

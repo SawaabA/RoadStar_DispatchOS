@@ -2,7 +2,7 @@
 set -euo pipefail
 
 TARGET=${1:-/opt/roadstar}
-IMAGE=ghcr.io/project-osrm/osrm-backend:v26.9.0
+IMAGE=ghcr.io/project-osrm/osrm-backend:v26.9.0-debian
 SOURCE=https://download.geofabrik.de/north-america/canada/ontario-latest.osm.pbf
 DATA="$TARGET/deploy/osrm/data"
 
@@ -49,16 +49,24 @@ if [ "$memory_kb" -lt "$required_memory_kb" ]; then
 fi
 
 mkdir -p "$DATA"
-curl --fail --location --retry 3 --output "$DATA/ontario-latest.osm.pbf.download" "$SOURCE"
 curl --fail --location --retry 3 --output "$DATA/ontario-latest.osm.pbf.md5" "$SOURCE.md5"
 expected=$(awk '{print $1}' "$DATA/ontario-latest.osm.pbf.md5")
-actual=$(md5sum "$DATA/ontario-latest.osm.pbf.download" | awk '{print $1}')
-if [ "$expected" != "$actual" ]; then
-  echo "Ontario extract checksum mismatch." >&2
-  rm -f "$DATA/ontario-latest.osm.pbf.download"
-  exit 1
+actual=""
+if [ -f "$DATA/ontario-latest.osm.pbf" ]; then
+  actual=$(md5sum "$DATA/ontario-latest.osm.pbf" | awk '{print $1}')
 fi
-mv "$DATA/ontario-latest.osm.pbf.download" "$DATA/ontario-latest.osm.pbf"
+if [ "$expected" = "$actual" ]; then
+  echo "Reusing the checksum-verified Ontario extract already on the server."
+else
+  curl --fail --location --retry 3 --output "$DATA/ontario-latest.osm.pbf.download" "$SOURCE"
+  actual=$(md5sum "$DATA/ontario-latest.osm.pbf.download" | awk '{print $1}')
+  if [ "$expected" != "$actual" ]; then
+    echo "Ontario extract checksum mismatch." >&2
+    rm -f "$DATA/ontario-latest.osm.pbf.download"
+    exit 1
+  fi
+  mv "$DATA/ontario-latest.osm.pbf.download" "$DATA/ontario-latest.osm.pbf"
+fi
 
 docker pull "$IMAGE"
 docker run --rm -t -v "$DATA:/data" "$IMAGE" osrm-extract -p /opt/car.lua /data/ontario-latest.osm.pbf
