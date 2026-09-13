@@ -69,6 +69,13 @@ Repository → Settings → Secrets and variables → Actions.
 | `DEPLOY_SSH_KEY` | Private half of the deploy keypair |
 | `DEPLOY_KNOWN_HOSTS` | Optional. Output of `ssh-keyscan <host>`. Without it the workflow trusts the host key on first use and logs a warning. |
 
+The workflow refuses to run rather than producing a broken release when these are missing: the web
+image build fails if the two `VITE_` values are absent, and the release job fails before touching the
+droplet if the `DEPLOY_` values are absent. Both errors name the missing secrets.
+
+**Adding repository secrets requires admin permission on the repository.** A collaborator with only
+push access cannot set them, from the web UI or `gh secret set`.
+
 Never store a Supabase `service_role` or secret key here. The two `VITE_` values are the only
 credentials the browser build needs, and row-level security is what protects the data.
 

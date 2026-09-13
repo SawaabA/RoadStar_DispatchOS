@@ -49,6 +49,19 @@ jobs:
         id: image
         run: echo "name=${REGISTRY}/${GITHUB_REPOSITORY,,}-${{ matrix.service }}" >> "$GITHUB_OUTPUT"
 
+      # Publishing a web image with no Supabase configuration would tag a
+      # demo-mode bundle as latest, which fails silently at runtime.
+      - name: Require browser build configuration
+        if: matrix.service == 'web'
+        env:
+          URL: ${{ secrets.VITE_SUPABASE_URL }}
+          KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          if [ -z "$URL" ] || [ -z "$KEY" ]; then
+            echo "::error::VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY are required repository secrets. Without them the web bundle ships with no cloud configuration and stays in local demo mode. See deploy/README.md."
+            exit 1
+          fi
+
       - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
@@ -83,6 +96,21 @@ jobs:
       packages: read
     steps:
       - uses: actions/checkout@v4
+
+      - name: Require deployment configuration
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          missing=""
+          [ -n "$DEPLOY_HOST" ] || missing="$missing DEPLOY_HOST"
+          [ -n "$DEPLOY_USER" ] || missing="$missing DEPLOY_USER"
+          [ -n "$DEPLOY_SSH_KEY" ] || missing="$missing DEPLOY_SSH_KEY"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing required repository secrets:$missing. Images were published successfully; only the release to the droplet was skipped. See deploy/README.md."
+            exit 1
+          fi
 
       - name: Authorise SSH
         run: |
