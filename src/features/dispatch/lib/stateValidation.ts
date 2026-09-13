@@ -63,7 +63,13 @@ export function isDispatchState(value: unknown): value is DispatchState {
         loadIds.has(item.loadId) &&
         driverIds.has(item.driverId) &&
         truckIds.has(item.truckId) &&
-        trailerIds.has(item.trailerId),
+        trailerIds.has(item.trailerId) &&
+        (!item.addedLoadIds ||
+          (Array.isArray(item.addedLoadIds) &&
+            item.addedLoadIds.every(
+              (loadId) => typeof loadId === "string" && loadId !== item.loadId && loadIds.has(loadId),
+            ) &&
+            new Set(item.addedLoadIds).size === item.addedLoadIds.length)),
     ) &&
     candidate.visits.every(
       (item) =>

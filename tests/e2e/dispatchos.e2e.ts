@@ -32,7 +32,7 @@ test("all primary workspaces render without serious accessibility violations", a
     ["Detention", "Detention desk"],
     ["Driver view", "Hi, Sofia"],
     ["3D load planner", "3D trailer builder"],
-    ["Intelligence", "Exceptions and automatic re-planning"],
+    ["Alerts & decisions", "What needs a decision"],
     ["KPI & replay", "KPI and historical replay"],
     ["Integrations", "Integration adapters"],
   ] as const;
@@ -56,10 +56,31 @@ test("dispatcher can assign and then unassign an eligible unit", async ({ page }
   await page.getByRole("button", { name: /Find eligible unit/ }).first().click();
   const modal = page.getByRole("dialog", { name: /RS-4521/ });
   await expect(modal).toBeVisible();
-  await modal.locator(".candidate:not(.blocked)").first().getByRole("button", { name: "Assign" }).click();
-  await expect(page.getByRole("button", { name: /Plan my morning/ })).toContainText("3 loads");
-  await page.locator(".assignment-card").filter({ hasText: "RS-4521" }).getByRole("button", { name: "Unassign" }).click();
+  await modal.locator(".unit-card:not(.blocked)").first().getByRole("button", { name: "Assign" }).click();
   await expect(page.getByRole("button", { name: /Plan my morning/ })).toContainText("4 loads");
+  await page.locator(".trip-card").filter({ hasText: "RS-4521" }).getByRole("button", { name: "Remove" }).click();
+  await expect(page.getByRole("button", { name: /Plan my morning/ })).toContainText("5 loads");
+});
+
+test("dispatcher consolidates a second load onto a truck that has room", async ({ page }) => {
+  await page.getByRole("button", { name: /^Dispatch board/ }).click();
+  await page.locator(".load-card").filter({ hasText: "RS-4521" }).getByRole("button", { name: /Find eligible unit/ }).click();
+  const planner = page.getByRole("dialog", { name: /RS-4521/ });
+  await planner.locator(".unit-card:not(.blocked)").first().getByRole("button", { name: "Assign" }).click();
+
+  const trip = page.locator(".trip-card").filter({ hasText: "RS-4521" });
+  await trip.getByRole("button", { name: "Add load" }).click();
+  const consolidation = page.getByRole("dialog", { name: /Add a load to Truck/ });
+  const option = consolidation.locator(".coload-row:not(.blocked)").first();
+  // The dispatcher decides with the extra distance and the extra time in view.
+  await expect(option).toContainText("added distance");
+  await expect(option).toContainText("added on-duty time");
+  await option.getByRole("button", { name: "Add to this trip" }).click();
+
+  await expect(trip).toContainText("consolidated");
+  await expect(trip).toContainText("2 loads");
+  // One truck, two loads: the second load leaves the unassigned column.
+  await expect(page.getByRole("button", { name: /Plan my morning/ })).toContainText("3 loads");
 });
 
 test("morning plan stays a proposal until approval", async ({ page }) => {
@@ -75,6 +96,22 @@ test("driver can start an accepted route", async ({ page }) => {
   await page.getByRole("button", { name: "Driver view", exact: true }).click();
   await page.getByRole("button", { name: "Start route" }).click();
   await expect(page.getByText("in transit", { exact: true })).toBeVisible();
+});
+
+test("driver can open licence, carrier and load paperwork", async ({ page }) => {
+  await page.getByRole("button", { name: "Driver view", exact: true }).click();
+  await page.getByRole("tab", { name: "Documents" }).click();
+
+  const papers = page.locator(".driver-papers");
+  await expect(papers.getByRole("heading", { name: "My credentials" })).toBeVisible();
+  await expect(papers.getByText("Ontario Class AZ licence")).toBeVisible();
+  await expect(papers.getByText("CVOR certificate")).toBeVisible();
+  await expect(papers.getByRole("heading", { name: /^Load papers/ })).toBeVisible();
+  await papers.getByText("Bill of lading").click();
+  await expect(papers.locator("details[open]").first()).toContainText("signature at delivery");
+
+  await page.getByRole("tab", { name: "Today" }).click();
+  await expect(page.getByRole("heading", { name: /^Hi, / })).toBeVisible();
 });
 
 test.describe("on a phone", () => {
@@ -193,7 +230,7 @@ test("global search, map style, and detention evidence controls work", async ({
 });
 
 test("dispatcher can review and record an incident re-plan decision", async ({ page }) => {
-  await page.getByRole("button", { name: /^Intelligence/ }).click();
+  await page.getByRole("button", { name: /^Alerts & decisions/ }).click();
   await page.getByRole("button", { name: "Inject demo closure" }).click();
   const proposal = page.locator(".decision-card").filter({ hasText: "+35 min" }).first();
   await expect(proposal).toContainText("+35 min");
@@ -203,7 +240,7 @@ test("dispatcher can review and record an incident re-plan decision", async ({ p
 });
 
 test("copilot shows RoadStar's computed facts when no one is signed in", async ({ page }) => {
-  await page.getByRole("button", { name: /^Intelligence/ }).click();
+  await page.getByRole("button", { name: /^Alerts & decisions/ }).click();
   const question = page.getByRole("button", { name: "What is our detention exposure?" });
   await question.click();
   await expect(question).toHaveAttribute("aria-pressed", "true");

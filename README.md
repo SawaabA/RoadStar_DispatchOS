@@ -1,6 +1,8 @@
 # RoadStar DispatchOS
 
-RoadStar DispatchOS is a unified Southern Ontario dispatch workspace. It combines manual dispatch, explainable fleet-wide planning, practical Canadian HOS checks, live track-and-trace, geofences, automated detention, a focused driver workflow, and stop-aware 3D trailer loading.
+RoadStar DispatchOS is a unified Southern Ontario dispatch workspace. It combines manual dispatch, multi-load trip consolidation with trailer-capacity and appointment checks, explainable fleet-wide planning, practical Canadian HOS checks, live track-and-trace, geofences, automated detention, a focused driver workflow with its own paperwork tab, and stop-aware 3D trailer loading.
+
+A load can be dispatched as its own trip or consolidated onto a truck that still has room. Before anything is committed, RoadStar re-sequences the trip's stops and shows the added distance, the added on-duty time, how far apart the delivery points are, the resulting weight and pallet-position fill, and the driver's remaining hours.
 
 ## Run the application
 

@@ -111,6 +111,13 @@ export function deriveExceptions(
   incidents: RoadIncident[],
 ): OperationalException[] {
   const results: OperationalException[] = [];
+  // Equipment RoadStar simply does not own is a data-quality problem, not a
+  // dispatch problem: no amount of re-planning finds a flatbed that is not in
+  // the asset master.
+  const fleetEquipment = [...new Set(state.trailers.map((trailer) => trailer.type))];
+  // A blocked load usually collects every rejection reason in the fleet. Lead
+  // with the reason that describes the load, not with idle-asset noise.
+  const reasonRank = { equipment: 0, weight: 1, hos: 2, pickup: 3, status: 4 } as const;
   for (const load of state.loads.filter((item) => item.status === "unassigned")) {
     const candidates = state.drivers.flatMap((driver) => {
       const trailer = state.trailers.find((item) => item.id === driver.trailerId);
@@ -118,7 +125,27 @@ export function deriveExceptions(
       return trailer ? [evaluateCandidate(load, driver, trailer, truck)] : [];
     });
     if (candidates.some((candidate) => candidate.feasible)) continue;
-    const reasons = [...new Set(candidates.flatMap((candidate) => candidate.reasons.map((reason) => reason.label)))];
+    if (!fleetEquipment.includes(load.equipment)) {
+      results.push({
+        id: `LOAD-${load.id}-data`,
+        type: "data",
+        severity: "critical",
+        title: `${load.billNumber} needs a ${load.equipment}; the asset master has none`,
+        detail: `RoadStar's trailer records list only ${fleetEquipment.join(" and ")} equipment, so this load cannot be planned. Confirm a leased trailer, re-broker it, or correct the asset master.`,
+        entityId: load.id,
+        recommendedAction: "Review the trailer asset master",
+        actionView: "fleet",
+      });
+      continue;
+    }
+    const reasons = [
+      ...new Set(
+        candidates
+          .flatMap((candidate) => candidate.reasons)
+          .sort((left, right) => reasonRank[left.code] - reasonRank[right.code])
+          .map((reason) => reason.label),
+      ),
+    ];
     const type = candidates.some((candidate) => candidate.reasons.some((reason) => reason.code === "equipment"))
       ? "equipment"
       : candidates.some((candidate) => candidate.reasons.some((reason) => reason.code === "hos"))

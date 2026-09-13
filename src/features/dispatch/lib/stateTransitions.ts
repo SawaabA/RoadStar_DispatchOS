@@ -1,4 +1,5 @@
 import { evaluateCandidate } from "./optimizer";
+import { carriedLoadIds, evaluateCoLoad, planTrip, tripLoadIds } from "./tripPlanning";
 import type {
   Assignment,
   DecisionRecord,
@@ -7,6 +8,39 @@ import type {
   DispatchState,
   DriverAssignmentAction,
 } from "../types";
+
+const TRIP_EDITABLE_STATUSES: Array<Assignment["status"]> = ["proposed", "dispatched", "accepted"];
+
+const uniqueAssignmentId = (current: DispatchState, billNumber: string) => {
+  const base = `A-${billNumber.replace("RS-", "")}`;
+  if (!current.assignments.some((item) => item.id === base)) return base;
+  let suffix = 2;
+  while (current.assignments.some((item) => item.id === `${base}-${suffix}`)) suffix += 1;
+  return `${base}-${suffix}`;
+};
+
+/** Re-times a trip from where the truck stands now, over every load it carries. */
+function tripEta(
+  current: DispatchState,
+  assignment: Assignment,
+  loadIds: string[],
+  now: number,
+): string | null {
+  const driver = current.drivers.find((item) => item.id === assignment.driverId);
+  const trailer = current.trailers.find((item) => item.id === assignment.trailerId);
+  const truck = current.trucks.find((item) => item.id === assignment.truckId);
+  const loads = loadIds.flatMap((id) => current.loads.filter((load) => load.id === id));
+  if (!driver || !trailer || loads.length !== loadIds.length) return null;
+  return planTrip({
+    loads,
+    driver,
+    trailer,
+    truck,
+    start: assignment.currentPoint,
+    startAt: now,
+    pickedUpLoadIds: carriedLoadIds(assignment),
+  }).finishAt;
+}
 
 export function assignCandidate(
   current: DispatchState,
@@ -38,7 +72,7 @@ export function assignCandidate(
 
   const assignedAt = new Date(now).toISOString();
   const assignment: Assignment = {
-    id: `A-${load.billNumber.replace("RS-", "")}`,
+    id: uniqueAssignmentId(current, load.billNumber),
     loadId: load.id,
     driverId: driver.id,
     truckId: truck.id,
@@ -74,11 +108,81 @@ export function assignCandidate(
   };
 }
 
+/**
+ * Consolidates another load onto a trip that has not left yet. The co-load
+ * evaluation is re-run here so a stale screen cannot commit a trip that no
+ * longer fits the trailer, the appointments, or the driver's clock.
+ */
+export function addLoadToTrip(
+  current: DispatchState,
+  assignmentId: string,
+  loadId: string,
+  now = Date.now(),
+): DispatchState {
+  const assignment = current.assignments.find((item) => item.id === assignmentId);
+  if (!assignment || !TRIP_EDITABLE_STATUSES.includes(assignment.status)) return current;
+  if (tripLoadIds(assignment).includes(loadId)) return current;
+
+  const candidate = current.loads.find((item) => item.id === loadId);
+  const driver = current.drivers.find((item) => item.id === assignment.driverId);
+  const trailer = current.trailers.find((item) => item.id === assignment.trailerId);
+  const truck = current.trucks.find((item) => item.id === assignment.truckId);
+  if (!candidate || !driver || !trailer || candidate.status !== "unassigned") return current;
+
+  const existing = tripLoadIds(assignment).flatMap((id) =>
+    current.loads.filter((load) => load.id === id),
+  );
+  if (!existing.length) return current;
+
+  const evaluation = evaluateCoLoad({
+    tripLoads: existing,
+    candidate,
+    driver,
+    trailer,
+    truck,
+    start: assignment.currentPoint,
+    startAt: now,
+    pickedUpLoadIds: carriedLoadIds(assignment),
+  });
+  if (!evaluation.feasible) return current;
+
+  const decision: DecisionRecord = {
+    id: `trip:${assignment.id}:${candidate.id}:${now}`,
+    kind: "load",
+    outcome: "accepted",
+    createdAt: new Date(now).toISOString(),
+    summary: `Consolidated ${candidate.billNumber} onto ${assignment.id} (+${Math.round(evaluation.addedKm)} km, +${evaluation.addedMinutes} min)`,
+  };
+
+  return {
+    ...current,
+    loads: current.loads.map((item) =>
+      item.id === candidate.id ? { ...item, status: "assigned" } : item,
+    ),
+    assignments: current.assignments.map((item) =>
+      item.id === assignment.id
+        ? {
+            ...item,
+            addedLoadIds: [...(item.addedLoadIds ?? []), candidate.id],
+            eta: evaluation.combined.finishAt,
+          }
+        : item,
+    ),
+    decisionLog: [...(current.decisionLog ?? []), decision].slice(-500),
+  };
+}
+
+/**
+ * Releases one load. A consolidated trip keeps running with the freight that
+ * stays on it; the driver, truck and trailer are only freed when the last load
+ * leaves the trip.
+ */
 export function unassignLoad(
   current: DispatchState,
   loadId: string,
+  now = Date.now(),
 ): DispatchState {
-  const assignment = current.assignments.find((item) => item.loadId === loadId);
+  const assignment = current.assignments.find((item) => tripLoadIds(item).includes(loadId));
   if (
     !assignment ||
     assignment.status === "in_transit" ||
@@ -86,11 +190,27 @@ export function unassignLoad(
   )
     return current;
 
+  const remaining = tripLoadIds(assignment).filter((id) => id !== loadId);
+  const loads = current.loads.map((item) =>
+    item.id === loadId ? { ...item, status: "unassigned" as const } : item,
+  );
+
+  if (remaining.length) {
+    const [primary, ...added] = remaining as [string, ...string[]];
+    const retimed = { ...assignment, loadId: primary, addedLoadIds: added };
+    const eta = tripEta({ ...current, loads }, retimed, remaining, now) ?? assignment.eta;
+    return {
+      ...current,
+      loads,
+      assignments: current.assignments.map((item) =>
+        item.id === assignment.id ? { ...retimed, eta } : item,
+      ),
+    };
+  }
+
   return {
     ...current,
-    loads: current.loads.map((item) =>
-      item.id === loadId ? { ...item, status: "unassigned" } : item,
-    ),
+    loads,
     drivers: current.drivers.map((item) =>
       item.id === assignment.driverId ? { ...item, status: "available" } : item,
     ),
@@ -123,7 +243,11 @@ export function transitionDriverAssignment(
   const canDecline = action === "declined" && ["proposed", "dispatched"].includes(assignment.status);
   if (!canAccept && !canStart && !canDecline) return current;
   if (canDecline) {
-    const next = unassignLoad(current, assignment.loadId);
+    // Declining returns the whole trip, not only its first load.
+    const next = tripLoadIds(assignment).reduce(
+      (state, loadId) => unassignLoad(state, loadId, now),
+      current,
+    );
     return {
       ...next,
       decisionLog: [
@@ -140,6 +264,7 @@ export function transitionDriverAssignment(
   }
 
   const nextStatus = action as Assignment["status"];
+  const carried = new Set(tripLoadIds(assignment));
   return {
     ...current,
     assignments: current.assignments.map((item) =>
@@ -152,7 +277,7 @@ export function transitionDriverAssignment(
         : item,
     ),
     loads: current.loads.map((load) =>
-      load.id === assignment.loadId
+      carried.has(load.id)
         ? { ...load, status: action === "in_transit" ? "in_transit" : "assigned" }
         : load,
     ),

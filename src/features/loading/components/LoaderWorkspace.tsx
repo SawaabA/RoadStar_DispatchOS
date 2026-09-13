@@ -71,7 +71,6 @@ export function LoaderWorkspace({ dispatchLoads = [], onPersistCargo, onSavePlan
   const [axleHeat, setAxleHeat] = useState(false);
   const [unit, setUnit] = useState<"imperial" | "metric">("imperial");
   const [strategy, setStrategy] = useState<PlanStrategy>("space");
-  const [cameraReset, setCameraReset] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [locked, setLocked] = useState<string[]>([]);
   const lockedPlacements = useRef(new Map<string, PackedItem>());
@@ -108,7 +107,12 @@ export function LoaderWorkspace({ dispatchLoads = [], onPersistCargo, onSavePlan
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to generate a load plan."); }
     finally { setLoading(false); }
   }, [strategy]);
-  useEffect(() => { void generatePlan(initial); }, [generatePlan]);
+  // Re-plans on mount and whenever the objective changes, always from the
+  // manifest on screen: changing the objective used to silently plan the demo
+  // manifest instead of the cargo the dispatcher had added.
+  const manifest = useRef(loads);
+  manifest.current = loads;
+  useEffect(() => { void generatePlan(manifest.current); }, [generatePlan]);
   useEffect(() => { void refreshSavedPlans(); }, [refreshSavedPlans]);
 
   const requestedWeight = loads.reduce((sum, load) => sum + (Number.isFinite(load.weightLbs) ? load.weightLbs : 0), 0);
@@ -217,15 +221,17 @@ export function LoaderWorkspace({ dispatchLoads = [], onPersistCargo, onSavePlan
     <section className="loader-scene" aria-label={`Interactive trailer plan with ${plan.items.length} planned and ${plan.unplanned.length} unplanned pieces`}>
       <div className="scene-label"><span><i />INTERACTIVE LOAD PLAN</span><small>DRAG TO ORBIT · SCROLL TO ZOOM</small></div>
       <div className="scene-tools" aria-label="3D view controls">
-        <div><Eye />{(["perspective", "driver", "top", "side", "rear"] as CameraView[]).map((view) => <button key={view} className={cameraView === view ? "active" : ""} onClick={() => setCameraView(view)}>{view}</button>)}<button onClick={() => setCameraReset((value) => value + 1)}>Reset camera</button></div>
+        <div><Eye />{(["perspective", "driver", "top", "side", "rear"] as CameraView[]).map((view) => <button key={view} className={cameraView === view ? "active" : ""} onClick={() => setCameraView(view)}>{view}</button>)}</div>
         <div><Layers3 /><button className={exploded ? "active" : ""} onClick={() => setExploded(!exploded)} aria-pressed={exploded}>Explode</button><button className={labels ? "active" : ""} onClick={() => setLabels(!labels)} aria-pressed={labels}>Labels</button><button className={axleHeat ? "active" : ""} onClick={() => setAxleHeat(!axleHeat)} aria-pressed={axleHeat}>Axle heat</button></div>
         <div><Boxes /><select aria-label="Color cargo by" value={colorMode} onChange={(event) => setColorMode(event.target.value as ColorMode)}><option value="load">Colour by load</option><option value="stop">Colour by stop</option><option value="weight">Weight heat map</option><option value="constraint">Constraint status</option></select><select aria-label="Optimization objective" value={strategy} onChange={(event) => setStrategy(event.target.value as PlanStrategy)}><option value="space">Best space use</option><option value="balance">Best weight balance</option><option value="unload">Fastest unloading</option><option value="damage">Lowest damage risk</option></select></div>
         <div><Play /><button className={playing ? "active" : ""} onClick={() => { setStop(0); setPlaying(!playing); }}>{playing ? "Stop animation" : "Animate unload"}</button><button onClick={() => window.print()}><Printer />Print manifest</button></div>
       </div>
-      <TrailerScene key={`${cameraView}-${cameraReset}`} trailer={trailer} items={plan.items} activeStop={stop} activeLayer={layer} view={cameraView} colorMode={colorMode} exploded={exploded} showLabels={labels} showAxleHeat={axleHeat} focusItem={selected} onSelect={setSelected} />
+      <TrailerScene key={cameraView} trailer={trailer} items={plan.items} activeStop={stop} activeLayer={layer} view={cameraView} colorMode={colorMode} exploded={exploded} showLabels={labels} showAxleHeat={axleHeat} focusItem={selected} onSelect={setSelected} />
       <p className="sr-only" aria-live="polite">{plan.items.length} pieces placed across {layers.length} vertical layers. {plan.unplanned.length} pieces are unplanned. Weight utilization is {weight} percent and volume utilization is {volume} percent.</p>
-      <div className="layer-filter"><button className={layer === "all" ? "active" : ""} onClick={() => setLayer("all")}>All layers</button>{layers.map((value, index) => <button key={value} className={layer === value ? "active" : ""} onClick={() => setLayer(value)}>L{index + 1} · {value}″</button>)}</div>
-      <div className="stop-filter"><button className={stop === 0 ? "active" : ""} onClick={() => setStop(0)}>All stops</button>{uniqueStops.map((value) => <button className={stop === value ? "active" : ""} key={value} onClick={() => setStop(value)}>Stop {value}</button>)}</div>
+      <div className="plan-filters">
+        <div role="group" aria-label="Filter by layer"><span>LAYER</span><button className={layer === "all" ? "active" : ""} onClick={() => setLayer("all")}>All</button>{layers.map((value, index) => <button key={value} className={layer === value ? "active" : ""} onClick={() => setLayer(value)}>L{index + 1} · {value}″</button>)}</div>
+        <div role="group" aria-label="Filter by stop"><span>STOP</span><button className={stop === 0 ? "active" : ""} onClick={() => setStop(0)}>All</button>{uniqueStops.map((value) => <button className={stop === value ? "active" : ""} key={value} onClick={() => setStop(value)}>{value}</button>)}</div>
+      </div>
     </section>
 
     <aside className="loader-health">
@@ -235,9 +241,11 @@ export function LoaderWorkspace({ dispatchLoads = [], onPersistCargo, onSavePlan
       <Metric label="Floor demand" value={`${floor}%`} pct={floor} /><Metric label="Volume used" value={`${volume}%`} pct={volume} /><Metric label="Weight centre" value={`${centrePct}% from nose`} pct={centrePct} />
       <div className="loader-counts"><span><Box />Planned<b>{plan.items.length}</b></span><span><AlertTriangle />Unplanned<b>{plan.unplanned.length}</b></span><span><Layers3 />Layers<b>{layers.length}</b></span><span><Truck />Stops<b>{uniqueStops.length}</b></span></div>
       <h3>VALIDATION</h3>
-      <p className={requestedWeight <= trailer.capacityLbs ? "valid" : "warning"}>{requestedWeight <= trailer.capacityLbs ? "✓" : "!"} Shipment weight {requestedWeight <= trailer.capacityLbs ? "is within" : "exceeds"} capacity</p>
+      {/* Weight, floor and centre of gravity are already metered above, so this
+          list only carries what those meters cannot show. */}
       <p className={plan.unplanned.length ? "warning" : "valid"}>{plan.unplanned.length ? `! ${plan.unplanned.length} pieces need review` : "✓ Every piece has a placement"}</p>
-      <p className={centrePct >= 35 && centrePct <= 65 ? "valid" : "warning"}>{centrePct >= 35 && centrePct <= 65 ? "✓" : "!"} Weight centre is {centrePct}% from trailer nose</p>
+      {requestedWeight > trailer.capacityLbs && <p className="warning">! Shipment weight exceeds trailer capacity by {(requestedWeight - trailer.capacityLbs).toLocaleString()} lb</p>}
+      {(centrePct < 35 || centrePct > 65) && <p className="warning">! Weight centre sits {centrePct}% from the trailer nose; balance before release</p>}
       {!trailer.axleModelVerified && <p className="warning">! Axle geometry is not calibrated; verify axle weights before release.</p>}
       {loads.some((load) => load.estimated ?? true) && <p className="warning">! Estimated dimensions are marked; verify before loading.</p>}
       {plan.warnings.map((warning) => <p className="warning" key={warning}>! {warning}</p>)}

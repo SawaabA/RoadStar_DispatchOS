@@ -1,5 +1,4 @@
-import distance from '@turf/distance'
-import { point } from '@turf/helpers'
+import { driveHours, kmBetween } from './geo'
 import type { DispatchCandidate, DispatchLoad, Driver, OptimizationWeights, PlanProposal, TrailerAsset, TruckAsset } from '../types'
 
 export const DEFAULT_OPTIMIZATION_WEIGHTS: OptimizationWeights = {
@@ -8,14 +7,6 @@ export const DEFAULT_OPTIMIZATION_WEIGHTS: OptimizationWeights = {
   hosBuffer: 20,
   futurePosition: 10,
 }
-
-// Great-circle distance understates road distance, so every measured leg
-// carries the same circuity correction. Applying it to the loaded trip but
-// not to the deadhead understated deadhead, which is the heaviest weighted
-// score component.
-const ROAD_CIRCUITY = 1.18
-const kmBetween = (a: {lat:number;lng:number}, b: {lat:number;lng:number}) => distance(point([a.lng,a.lat]), point([b.lng,b.lat]), { units:'kilometers' }) * ROAD_CIRCUITY
-const driveHours = (km: number) => km / 82
 
 export function evaluateCandidate(
   load: DispatchLoad,

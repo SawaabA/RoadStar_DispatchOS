@@ -93,6 +93,28 @@ export const createDemoState = (): DispatchState => ({
       priority: "high",
     },
     {
+      // Light LTL freight on the same Milton→London lane as RS-4521: the
+      // consolidation case a dispatcher would otherwise have to spot by hand.
+      id: "L-4540",
+      billNumber: "RS-4540",
+      customer: "Halton Beverage",
+      description: "Palletized beverage cases",
+      status: "unassigned",
+      equipment: "Dry Van",
+      origin: "Milton, ON",
+      originPoint: cityPoints.Milton,
+      destination: "London, ON",
+      destinationPoint: cityPoints.London,
+      pickupStart: at(9, 45),
+      pickupEnd: at(11, 30),
+      deliveryEnd: at(15),
+      weightLbs: 9400,
+      pallets: 6,
+      temperatureControlled: false,
+      rate: 1650,
+      priority: "standard",
+    },
+    {
       id: "L-4534",
       billNumber: "RS-4534",
       customer: "Durham Home",

@@ -6,9 +6,19 @@ import { createInjectedClosure } from "./trafficProvider";
 describe("dispatch intelligence", () => {
   it("deduplicates actionable operational exceptions", () => {
     const exceptions = deriveExceptions(createDemoState(), []);
-    expect(exceptions.some((item) => item.type === "equipment")).toBe(true);
     expect(exceptions.some((item) => item.type === "detention")).toBe(true);
     expect(new Set(exceptions.map((item) => item.id)).size).toBe(exceptions.length);
+  });
+
+  it("names the missing equipment type instead of blaming idle assets", () => {
+    // The flatbed load has no matching trailer anywhere in the asset master,
+    // which is a record problem a dispatcher must resolve, not a re-plan.
+    const flatbed = deriveExceptions(createDemoState(), []).find((item) => item.entityId === "L-4530");
+
+    expect(flatbed?.type).toBe("data");
+    expect(flatbed?.title).toMatch(/needs a Flatbed/);
+    expect(flatbed?.detail).toMatch(/asset master/i);
+    expect(flatbed?.detail).not.toMatch(/unavailable/i);
   });
 
   it("turns a corridor closure into explainable re-plan impact", () => {

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createDemoState } from "../data/demoData";
 import { buildMorningPlan, evaluateCandidate } from "../lib/optimizer";
-import { addLoad, assignCandidate, transitionDriverAssignment, unassignLoad } from "../lib/stateTransitions";
+import { addLoad, addLoadToTrip, assignCandidate, transitionDriverAssignment, unassignLoad } from "../lib/stateTransitions";
+import { carriedLoadIds, evaluateCoLoad, planTrip, tripLoadIds, type CoLoadEvaluation, type TripPlan } from "../lib/tripPlanning";
 import { isDispatchState } from "../lib/stateValidation";
 import { updateGeofenceVisits } from "../lib/geofencing";
 import { validateTelemetryEvent } from "../lib/telemetryValidation";
@@ -319,6 +320,127 @@ export function useDispatchOperations() {
     [canManageDispatch],
   );
 
+  /** The sequenced stop plan, distance, on-duty time and capacity use of a trip. */
+  const tripPlanFor = useCallback(
+    (assignmentId: string): TripPlan | null => {
+      const assignment = state.assignments.find((item) => item.id === assignmentId);
+      if (!assignment) return null;
+      const driver = state.drivers.find((item) => item.id === assignment.driverId);
+      const trailer = state.trailers.find((item) => item.id === assignment.trailerId);
+      const truck = state.trucks.find((item) => item.id === assignment.truckId);
+      const loads = tripLoadIds(assignment).flatMap((id) =>
+        state.loads.filter((load) => load.id === id),
+      );
+      if (!driver || !trailer || !loads.length) return null;
+      return planTrip({
+        loads,
+        driver,
+        trailer,
+        truck,
+        start: assignment.currentPoint,
+        pickedUpLoadIds: carriedLoadIds(assignment),
+      });
+    },
+    [state],
+  );
+
+  /** What a single load would cost a new trip run by this driver, from scratch. */
+  const soloTripPlanFor = useCallback(
+    (loadId: string, driverId: string): TripPlan | null => {
+      const load = state.loads.find((item) => item.id === loadId);
+      const driver = state.drivers.find((item) => item.id === driverId);
+      const trailer = state.trailers.find((item) => item.id === driver?.trailerId);
+      const truck = state.trucks.find((item) => item.id === driver?.truckId);
+      if (!load || !driver || !trailer) return null;
+      return planTrip({
+        loads: [load],
+        driver,
+        trailer,
+        truck,
+        start: driver.point,
+        checkAvailability: true,
+      });
+    },
+    [state],
+  );
+
+  /** Trips that could still take more freight, scored against one open load. */
+  const coLoadOptionsFor = useCallback(
+    (loadId: string): Array<CoLoadEvaluation & { assignmentId: string }> => {
+      const candidate = state.loads.find((item) => item.id === loadId);
+      if (!candidate || candidate.status !== "unassigned") return [];
+      return state.assignments
+        .filter((assignment) => ["proposed", "dispatched", "accepted"].includes(assignment.status))
+        .flatMap((assignment) => {
+          const driver = state.drivers.find((item) => item.id === assignment.driverId);
+          const trailer = state.trailers.find((item) => item.id === assignment.trailerId);
+          const truck = state.trucks.find((item) => item.id === assignment.truckId);
+          const existing = tripLoadIds(assignment).flatMap((id) =>
+            state.loads.filter((load) => load.id === id),
+          );
+          if (!driver || !trailer || !existing.length) return [];
+          return [
+            {
+              assignmentId: assignment.id,
+              ...evaluateCoLoad({
+                tripLoads: existing,
+                candidate,
+                driver,
+                trailer,
+                truck,
+                start: assignment.currentPoint,
+                pickedUpLoadIds: carriedLoadIds(assignment),
+              }),
+            },
+          ];
+        })
+        .sort((left, right) => Number(right.feasible) - Number(left.feasible) || right.score - left.score);
+    },
+    [state],
+  );
+
+  /** Open loads that could join an existing trip, best fit first. */
+  const coLoadCandidatesFor = useCallback(
+    (assignmentId: string): Array<CoLoadEvaluation & { assignmentId: string }> => {
+      const assignment = state.assignments.find((item) => item.id === assignmentId);
+      if (!assignment || !["proposed", "dispatched", "accepted"].includes(assignment.status)) return [];
+      const driver = state.drivers.find((item) => item.id === assignment.driverId);
+      const trailer = state.trailers.find((item) => item.id === assignment.trailerId);
+      const truck = state.trucks.find((item) => item.id === assignment.truckId);
+      const existing = tripLoadIds(assignment).flatMap((id) =>
+        state.loads.filter((load) => load.id === id),
+      );
+      if (!driver || !trailer || !existing.length) return [];
+      return state.loads
+        .filter((load) => load.status === "unassigned")
+        .map((candidate) => ({
+          assignmentId,
+          ...evaluateCoLoad({
+            tripLoads: existing,
+            candidate,
+            driver,
+            trailer,
+            truck,
+            start: assignment.currentPoint,
+            pickedUpLoadIds: carriedLoadIds(assignment),
+          }),
+        }))
+        .sort((left, right) => Number(right.feasible) - Number(left.feasible) || right.score - left.score);
+    },
+    [state],
+  );
+
+  const addToTrip = useCallback(
+    (assignmentId: string, loadId: string) => {
+      if (!canManageDispatch) return false;
+      const next = addLoadToTrip(stateRef.current, assignmentId, loadId);
+      if (next === stateRef.current) return false;
+      setState(next);
+      return true;
+    },
+    [canManageDispatch],
+  );
+
   const generatePlan = useCallback(
     () => {
       if (!canManageDispatch) return;
@@ -513,7 +635,7 @@ export function useDispatchOperations() {
               : item,
           ),
           loads: current.loads.map((load) =>
-            load.id === assignment.loadId
+            tripLoadIds(assignment).includes(load.id)
               ? {
                   ...load,
                   status:
@@ -634,7 +756,7 @@ export function useDispatchOperations() {
           const completed = new Set(
             assignments
               .filter((a) => a.status === "completed")
-              .map((a) => a.loadId),
+              .flatMap((a) => tripLoadIds(a)),
           );
           return {
             ...current,
@@ -644,7 +766,7 @@ export function useDispatchOperations() {
               completed.has(load.id)
                 ? { ...load, status: "completed" }
                 : assignments.some(
-                      (a) => a.loadId === load.id && a.status === "in_transit",
+                      (a) => a.status === "in_transit" && tripLoadIds(a).includes(load.id),
                     )
                   ? { ...load, status: "in_transit" }
                   : load,
@@ -851,6 +973,11 @@ export function useDispatchOperations() {
     createLoadFromDraft,
     assign,
     unassign,
+    addToTrip,
+    tripPlanFor,
+    soloTripPlanFor,
+    coLoadOptionsFor,
+    coLoadCandidatesFor,
     generatePlan,
     applyPlan,
     updateAssignmentStatus,

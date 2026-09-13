@@ -1,7 +1,7 @@
 const baseUrl = (process.env.ROADSTAR_BASE_URL || "http://127.0.0.1:8080").replace(/\/$/, "");
 const supabaseUrl = process.env.VITE_SUPABASE_URL?.replace(/\/$/, "");
 const supabaseKey = process.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-const expectedSchema = process.env.EXPECTED_SCHEMA_VERSION || "20260913090218";
+const expectedSchema = process.env.EXPECTED_SCHEMA_VERSION || "20260913131500";
 const requireRealRouting = process.env.ROADSTAR_REQUIRE_REAL_ROUTING === "true";
 let failed = false;
 

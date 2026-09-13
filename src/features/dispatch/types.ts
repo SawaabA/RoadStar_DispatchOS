@@ -116,7 +116,10 @@ export type TrailerAsset = {
 
 export type Assignment = {
   id: string;
+  /** First load of the trip. Its lane drives the live map and telemetry. */
   loadId: string;
+  /** Freight consolidated onto the same truck after the trip was created. */
+  addedLoadIds?: string[];
   driverId: string;
   truckId: string;
   trailerId: string;

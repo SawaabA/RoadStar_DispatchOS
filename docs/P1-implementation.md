@@ -18,12 +18,17 @@ P1 turns the P0 operating picture into an approval-first decision system. Recomm
 | Versioned load plans | Immutable plan versions, history/restore and one approved version per trailer workspace | Supabase RPC contract and planner UI |
 | Advanced trailer planning | Mixed dimensions, real stack layers, floor-bearing/fragility limits, four objectives, manual safe placement, locks, camera/layer/stop controls and unloading replay | Planner unit tests, xflp compile and browser journeys |
 | Load intake | Guided order/route/stops/cargo creation, edit/duplicate/cancel/archive controls and decision history | Validation tests and end-to-end import into the 3D planner |
+| Trip consolidation | One truck can carry several loads: stops are re-sequenced, peak on-board weight and pallet positions are enforced, and the extra distance, extra on-duty time and corridor spread are priced before the dispatcher commits | Trip-planning and transition tests, consolidation browser journey |
+| Trailer capacity on the board | Every unit and trip shows on-board weight and pallet positions against the trailer, plus committed fleet capacity, planned distance and deadhead share | Board summary and unit capacity meters |
+| Driver paperwork | Driver app separates today's assignment from a documents tab carrying licence, abstract, medical, CVOR, insurance, inspection, IFTA and the load's own papers (demo records) | Driver documents browser journey |
 
 ## Supabase model
 
 `20260911145838_roadstar_p1_intelligence_and_concurrency.sql` adds `road_incidents`, `optimization_runs`, `decision_records`, `historical_replay_runs`, `provider_connections`, and `cargo_items`. Every exposed table has RLS, explicit authenticated grants, tenant predicates and access-pattern indexes. Authenticated decisions are also normalized into `decision_records`.
 
 `save_dispatch_snapshot` is a security-invoker compare-and-swap RPC. It only updates an authorized tenant row when the expected revision matches. A stale writer receives a non-retryable `P0001` application error with the revision-conflict message; the app preserves the edit, shows a conflict, and requires an explicit reload. Authorization failures use `42501` so they cannot be mistaken for concurrent edits.
+
+`20260913131500_consolidated_trip_driver_transitions.sql` replaces the privileged driver-transition function so accepting, starting or declining a trip moves every load riding on it, not only the assignment's primary load. Authorization, snapshot locking, revision increment and the audit record are unchanged; the decision context now records the trip's load list.
 
 `20260913070240_support_load_creation_decisions.sql` extends decision logging for the load lifecycle. `20260913090218_loading_plan_versions_and_neutral_sync_contract.sql` upgrades the existing loading-plan table in place, adds atomic version/approval RPCs, cargo constraints, stable external-record links, append-only sync events and a private idempotent outbox. It deliberately preserves the original `loading_plan_items` foreign key and legacy plan rows.
 

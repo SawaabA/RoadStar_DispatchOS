@@ -1,10 +1,11 @@
 import { lazy, Suspense, useEffect, useMemo, useState, useCallback } from "react";
-import { AlertTriangle, ArrowRight, Box, Check, ChevronDown, CircleDollarSign, Clock3, Database, Gauge, Layers3, LayoutDashboard, ListFilter, Map, MapPin, Menu, Navigation, PackageCheck, Play, Radio, RefreshCw, Route, Search, Settings2, ShieldCheck, Sparkles, Timer, Tractor, Truck, Users, Warehouse, X, Eye, EyeOff } from "lucide-react";
+import { AlertTriangle, ArrowRight, Box, Check, ChevronDown, CircleDollarSign, Clock3, Database, FileText, Gauge, Layers3, LayoutDashboard, ListFilter, Map, MapPin, Menu, Navigation, PackageCheck, Play, Radio, RefreshCw, Route, Search, Settings2, ShieldCheck, Sparkles, Timer, Tractor, Truck, Users, Warehouse, X, Eye, EyeOff } from "lucide-react";
 import { useDispatchOperations } from "../features/dispatch/hooks/useDispatchOperations";
 import { useRoadIntelligence } from "../features/intelligence/hooks/useRoadIntelligence";
 import { IntelligenceWorkspace } from "../features/intelligence/components/IntelligenceWorkspace";
 import { LoadDocumentsPanel } from "../features/documents/components/LoadDocumentsPanel";
 import { PodCapture } from "../features/documents/components/PodCapture";
+import { DriverPapersPanel } from "../features/documents/components/DriverPapersPanel";
 import { useLoadDocuments } from "../features/documents/hooks/useLoadDocuments";
 import { NewLoadForm } from "../features/dispatch/components/NewLoadForm";
 import { IntakeImporter, type ImportedDocument } from "../features/documents/components/IntakeImporter";
@@ -13,15 +14,17 @@ import { documentExceptions } from "../features/documents/lib/documentExceptions
 import { AnalyticsWorkspace } from "../features/intelligence/components/AnalyticsWorkspace";
 import { IntegrationsWorkspace } from "../features/intelligence/components/IntegrationsWorkspace";
 import { NewLoadModal } from "../features/dispatch/components/NewLoadModal";
-import type {
-  DispatchCandidate,
-  DispatchLoad,
-  Driver,
-} from "../features/dispatch/types";
+import { AssignmentPlanner } from "../features/dispatch/components/AssignmentPlanner";
+import { AddLoadToTripModal, TripCard } from "../features/dispatch/components/TripPanel";
+import { palletPositions, tripLoadIds } from "../features/dispatch/lib/tripPlanning";
+import { fmtDuration, fmtKm, fmtMoney, fmtTime, statusLabel } from "../features/dispatch/lib/format";
+import { STOP_SERVICE_HOURS, driveHours, kmBetween } from "../features/dispatch/lib/geo";
+import type { Assignment, DispatchLoad } from "../features/dispatch/types";
 import { isSupabaseConfigured } from "../shared/lib/supabase";
 import { isAuthCallbackHash } from "../shared/lib/authCallback";
 import { operationalPois } from "../features/map/data/operationalPois";
 import "./styles.css";
+import "./dispatch.css";
 
 type View =
   | "overview"
@@ -35,18 +38,6 @@ type View =
   | "intelligence"
   | "analytics"
   | "integrations";
-const fmtTime = (value: string) =>
-  new Intl.DateTimeFormat("en-CA", {
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(new Date(value));
-const fmtMoney = (value: number, currency: "CAD" | "USD" = "CAD") =>
-  new Intl.NumberFormat("en-CA", {
-    style: "currency",
-    currency,
-    maximumFractionDigits: 0,
-  }).format(value);
-const statusLabel = (value: string) => value.replaceAll("_", " ");
 const NAV: Array<{ id: View; label: string; icon: typeof LayoutDashboard }> = [
   { id: "overview", label: "Command center", icon: LayoutDashboard },
   { id: "dispatch", label: "Dispatch board", icon: Route },
@@ -56,7 +47,7 @@ const NAV: Array<{ id: View; label: string; icon: typeof LayoutDashboard }> = [
   { id: "detention", label: "Detention", icon: Timer },
   { id: "driver", label: "Driver view", icon: Navigation },
   { id: "loader", label: "3D load planner", icon: Layers3 },
-  { id: "intelligence", label: "Intelligence", icon: AlertTriangle },
+  { id: "intelligence", label: "Alerts & decisions", icon: AlertTriangle },
   { id: "analytics", label: "KPI & replay", icon: Gauge },
   { id: "integrations", label: "Integrations", icon: Settings2 },
 ];
@@ -272,91 +263,6 @@ function Overview({
   );
 }
 
-function AssignmentModal({
-  load,
-  drivers,
-  onClose,
-  onAssign,
-  candidateFor,
-}: {
-  load: DispatchLoad;
-  drivers: Driver[];
-  onClose: () => void;
-  onAssign: (c: DispatchCandidate) => void;
-  candidateFor: (l: string, d: string) => DispatchCandidate | null;
-}) {
-  const candidates = drivers
-    .map((d) => candidateFor(load.id, d.id))
-    .filter(Boolean) as DispatchCandidate[];
-  return (
-    <div
-      className="modal-backdrop"
-      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
-      onKeyDown={(e) => e.key === "Escape" && onClose()}
-    >
-      <section className="modal assignment-modal" role="dialog" aria-modal="true" aria-labelledby="assignment-title">
-        <button className="close" aria-label="Close assignment dialog" autoFocus onClick={onClose}>
-          <X />
-        </button>
-        <p className="kicker">MANUAL DISPATCH</p>
-        <h2 id="assignment-title">
-          {load.billNumber} · {load.origin} → {load.destination}
-        </h2>
-        <p className="modal-sub">
-          Choose a unit. DispatchOS checks equipment, capacity, pickup
-          feasibility, and HOS before assignment.
-        </p>
-        <div className="candidate-list">
-          {candidates
-            .sort(
-              (a, b) =>
-                Number(b.feasible) - Number(a.feasible) || b.score - a.score,
-            )
-            .map((c) => {
-              const d = drivers.find((x) => x.id === c.driverId)!;
-              return (
-                <article
-                  className={`candidate ${c.feasible ? "" : "blocked"}`}
-                  key={d.id}
-                >
-                  <span className="avatar">{d.initials}</span>
-                  <div className="candidate-copy">
-                    <div>
-                      <b>{d.name}</b>
-                      <Badge tone={c.feasible ? "green" : "red"}>
-                        {c.feasible ? "Feasible" : "Blocked"}
-                      </Badge>
-                    </div>
-                    <p>
-                      Truck {c.truckId.replace("T-", "")} · Trailer{" "}
-                      {c.trailerId} · {Math.round(c.deadheadKm)} km deadhead
-                    </p>
-                    <small>{c.explanation}</small>
-                    <details className="score-details">
-                      <summary>Why this score?</summary>
-                      <div><span>Deadhead <b>{Math.round(c.scoreBreakdown.deadhead)}</b></span><span>On-time <b>{Math.round(c.scoreBreakdown.onTime)}</b></span><span>HOS buffer <b>{Math.round(c.scoreBreakdown.hosBuffer)}</b></span><span>Future position <b>{Math.round(c.scoreBreakdown.futurePosition)}</b></span></div>
-                    </details>
-                  </div>
-                  <div className="candidate-score">
-                    <strong>{c.score}</strong>
-                    <small>MATCH</small>
-                  </div>
-                  <button
-                    disabled={!c.feasible}
-                    className="btn compact primary"
-                    onClick={() => onAssign(c)}
-                  >
-                    Assign
-                  </button>
-                </article>
-              );
-            })}
-        </div>
-      </section>
-    </div>
-  );
-}
-
 function PlanModal({ ops }: { ops: ReturnType<typeof useDispatchOperations> }) {
   const { proposal, state, setProposal, applyPlan } = ops;
   if (!proposal) return null;
@@ -470,8 +376,9 @@ function DispatchBoard({
 }: {
   ops: ReturnType<typeof useDispatchOperations>;
 }) {
-  const { state, generatePlan, unassign } = ops,
+  const { state, generatePlan } = ops,
     [selected, setSelected] = useState<DispatchLoad | null>(null),
+    [consolidating, setConsolidating] = useState<Assignment | null>(null),
     [filter, setFilter] = useState("all"),
     [query, setQuery] = useState("");
   const open = state.loads.filter(
@@ -483,6 +390,29 @@ function DispatchBoard({
           .includes(query.toLowerCase()),
     ),
     assigned = state.assignments.filter((a) => a.status !== "completed");
+  // Board-level capacity: what today's committed freight already occupies
+  // across the trailers that are out, so a dispatcher sees room at a glance.
+  const committed = assigned.flatMap((assignment) =>
+    tripLoadIds(assignment).flatMap((id) => state.loads.filter((load) => load.id === id)),
+  );
+  const committedWeight = committed.reduce((sum, load) => sum + load.weightLbs, 0);
+  const committedCapacity = assigned.reduce((sum, assignment) => {
+    const trailer = state.trailers.find((item) => item.id === assignment.trailerId);
+    return sum + (trailer?.capacityLbs ?? 0);
+  }, 0);
+  const consolidatedLoads = assigned.reduce(
+    (sum, assignment) => sum + (assignment.addedLoadIds?.length ?? 0),
+    0,
+  );
+  const plannedKm = assigned.reduce(
+    (sum, assignment) => sum + (ops.tripPlanFor(assignment.id)?.totalKm ?? 0),
+    0,
+  );
+  const plannedEmptyKm = assigned.reduce(
+    (sum, assignment) => sum + (ops.tripPlanFor(assignment.id)?.emptyKm ?? 0),
+    0,
+  );
+  const spareUnits = state.drivers.filter((driver) => driver.status === "available");
   return (
     <div className="page fade-in">
       <div className="page-heading">
@@ -531,6 +461,56 @@ function DispatchBoard({
         <button className="icon-btn" aria-label="Additional dispatch filters" disabled title="More filters are planned">
           <Settings2 />
         </button>
+      </div>
+      <div className="board-stats" aria-label="Board capacity summary">
+        <span>
+          <small>OPEN LOADS</small>
+          <b>{state.loads.filter((l) => l.status === "unassigned").length}</b>
+          <em>
+            {state.loads
+              .filter((l) => l.status === "unassigned")
+              .reduce((sum, l) => sum + l.weightLbs, 0)
+              .toLocaleString()}{" "}
+            lb waiting
+          </em>
+        </span>
+        <span>
+          <small>TRIPS OUT</small>
+          <b>{assigned.length}</b>
+          <em>
+            {committed.length} loads · {consolidatedLoads} consolidated
+          </em>
+        </span>
+        <span>
+          <small>TRAILER SPACE USED</small>
+          <b>
+            {committedCapacity > 0 ? Math.round((committedWeight / committedCapacity) * 100) : 0}%
+          </b>
+          <em>
+            {committedWeight.toLocaleString()} / {committedCapacity.toLocaleString()} lb committed
+          </em>
+        </span>
+        <span>
+          <small>PLANNED DISTANCE</small>
+          <b>{fmtKm(plannedKm)}</b>
+          <em>
+            {fmtKm(plannedEmptyKm)} empty ·{" "}
+            {plannedKm > 0 ? Math.round((plannedEmptyKm / plannedKm) * 100) : 0}% deadhead
+          </em>
+        </span>
+        <span>
+          <small>SPARE UNITS</small>
+          <b>{spareUnits.length}</b>
+          <em>
+            {spareUnits
+              .reduce((sum, driver) => {
+                const trailer = state.trailers.find((item) => item.id === driver.trailerId);
+                return sum + (trailer?.capacityLbs ?? 0);
+              }, 0)
+              .toLocaleString()}{" "}
+            lb idle capacity
+          </em>
+        </span>
       </div>
       <div className="dispatch-grid">
         <section className="board-column">
@@ -587,7 +567,29 @@ function DispatchBoard({
                 <span>
                   <Truck />
                   {load.equipment}
+                  {load.temperatureControlled ? " · temp" : ""}
                 </span>
+              </div>
+              <div className="load-lane">
+                {(() => {
+                  const laneKm = kmBetween(load.originPoint, load.destinationPoint);
+                  return (
+                    <>
+                      <span>
+                        <small>LANE</small>
+                        {fmtKm(laneKm)}
+                      </span>
+                      <span>
+                        <small>RUN TIME</small>
+                        {fmtDuration(driveHours(laneKm) + STOP_SERVICE_HOURS * 2)}
+                      </span>
+                      <span>
+                        <small>REVENUE</small>
+                        {fmtMoney(load.rate / Math.max(1, laneKm))}/km
+                      </span>
+                    </>
+                  );
+                })()}
               </div>
               <button
                 className="assign-action"
@@ -601,53 +603,37 @@ function DispatchBoard({
         </section>
         <section className="board-column planned">
           <div className="column-head">
-            <span>ACTIVE PLAN</span>
+            <span>TRIPS &amp; CONSOLIDATION</span>
             <Badge tone="green">{assigned.length}</Badge>
           </div>
-          {assigned.map((a) => {
-            const load = state.loads.find((l) => l.id === a.loadId)!,
-              driver = state.drivers.find((d) => d.id === a.driverId)!;
-            return (
-              <article className="assignment-card" key={a.id}>
-                <div className="assignment-top">
-                  <span className="avatar">{driver.initials}</span>
-                  <div>
-                    <b>{driver.name}</b>
-                    <p>
-                      Truck {a.truckId.replace("T-", "")} · {a.trailerId}
-                    </p>
-                  </div>
-                  <Badge tone={a.status === "in_transit" ? "green" : "blue"}>
-                    {statusLabel(a.status)}
-                  </Badge>
-                </div>
-                <div className="assignment-load">
-                  <b>{load.billNumber}</b>
-                  <span>
-                    {load.origin}
-                    <ArrowRight />
-                    {load.destination}
-                  </span>
-                </div>
-                <div className="assignment-foot">
-                  <span>
-                    <Clock3 /> ETA {fmtTime(a.eta)}
-                  </span>
-                  <button disabled={a.status === "in_transit"} title={a.status === "in_transit" ? "An in-transit load cannot be unassigned" : undefined} onClick={() => unassign(load.id)}>Unassign</button>
-                </div>
-              </article>
-            );
-          })}
+          {assigned.map((assignment) => (
+            <TripCard
+              key={assignment.id}
+              assignment={assignment}
+              ops={ops}
+              onAddLoad={setConsolidating}
+            />
+          ))}
+          {!assigned.length && <p className="empty-state">Nothing is dispatched yet.</p>}
         </section>
         <section className="board-column resources">
           <div className="column-head">
-            <span>AVAILABLE UNITS</span>
+            <span>UNITS &amp; CAPACITY</span>
             <Badge>
               {state.drivers.filter((d) => d.status === "available").length}
             </Badge>
           </div>
           {state.drivers.map((d) => {
             const trailer = state.trailers.find((t) => t.id === d.trailerId)!;
+            const trip = state.assignments.find(
+              (item) => item.driverId === d.id && item.status !== "completed",
+            );
+            const carrying = trip
+              ? tripLoadIds(trip).flatMap((id) => state.loads.filter((load) => load.id === id))
+              : [];
+            const onBoardLbs = carrying.reduce((sum, load) => sum + load.weightLbs, 0);
+            const onBoardPallets = carrying.reduce((sum, load) => sum + load.pallets, 0);
+            const positions = palletPositions(trailer);
             return (
               <article className={`resource-card ${d.status}`} key={d.id}>
                 <div>
@@ -655,10 +641,32 @@ function DispatchBoard({
                   <div>
                     <b>{d.name}</b>
                     <p>
-                      {d.id} · Truck {d.truckId.replace("T-", "")}
+                      {d.id} · Truck {d.truckId.replace("T-", "")} · {trailer.number}{" "}
+                      {trailer.type}
                     </p>
                   </div>
                   <i className="availability" />
+                </div>
+                <div className="unit-capacity">
+                  <span>
+                    <small>ON BOARD</small>
+                    <b>
+                      {onBoardLbs.toLocaleString()} / {trailer.capacityLbs.toLocaleString()} lb
+                    </b>
+                  </span>
+                  <i>
+                    <em
+                      style={{
+                        width: `${Math.min(100, (onBoardLbs / trailer.capacityLbs) * 100)}%`,
+                      }}
+                    />
+                  </i>
+                  <small>
+                    {onBoardPallets} / {positions} pallet positions ·{" "}
+                    {carrying.length
+                      ? `${carrying.length} load${carrying.length === 1 ? "" : "s"} · ${(trailer.capacityLbs - onBoardLbs).toLocaleString()} lb spare`
+                      : "empty and available"}
+                  </small>
                 </div>
                 <div className="resource-stats">
                   <span>
@@ -672,8 +680,10 @@ function DispatchBoard({
                     </b>
                   </span>
                   <span>
-                    <small>EQUIPMENT</small>
-                    {trailer.type}
+                    <small>ON DUTY</small>
+                    <b className={d.onDutyHoursRemaining < 4 ? "risk" : ""}>
+                      {d.onDutyHoursRemaining.toFixed(1)} h
+                    </b>
                   </span>
                 </div>
               </article>
@@ -682,15 +692,15 @@ function DispatchBoard({
         </section>
       </div>
       {selected && (
-        <AssignmentModal
-          load={selected}
-          drivers={state.drivers}
-          candidateFor={ops.candidateFor}
-          onClose={() => setSelected(null)}
-          onAssign={(c) => {
-            ops.assign(c);
-            setSelected(null);
-          }}
+        <AssignmentPlanner load={selected} ops={ops} onClose={() => setSelected(null)} />
+      )}
+      {consolidating && (
+        <AddLoadToTripModal
+          assignment={
+            state.assignments.find((item) => item.id === consolidating.id) ?? consolidating
+          }
+          ops={ops}
+          onClose={() => setConsolidating(null)}
         />
       )}
       <PlanModal ops={ops} />
@@ -1150,6 +1160,7 @@ function DriverPage({
 }) {
   const [showStopDetails, setShowStopDetails] = useState(false);
   const [actionPending, setActionPending] = useState(false);
+  const [tab, setTab] = useState<"today" | "papers">("today");
   const assignment =
       (ops.driverId
         ? ops.state.assignments.find((a) => a.driverId === ops.driverId && a.status !== "completed")
@@ -1175,7 +1186,47 @@ function DriverPage({
             <i /> Online
           </span>
         </header>
-        <div className="phone-main">
+        <div className="phone-tabs" role="tablist" aria-label="Driver app sections">
+          <button
+            role="tab"
+            id="driver-tab-today"
+            aria-selected={tab === "today"}
+            aria-controls="driver-panel-today"
+            className={tab === "today" ? "active" : ""}
+            onClick={() => setTab("today")}
+          >
+            <Navigation />
+            Today
+          </button>
+          <button
+            role="tab"
+            id="driver-tab-papers"
+            aria-selected={tab === "papers"}
+            aria-controls="driver-panel-papers"
+            className={tab === "papers" ? "active" : ""}
+            onClick={() => setTab("papers")}
+          >
+            <FileText />
+            Documents
+          </button>
+        </div>
+        {tab === "papers" ? (
+          <div
+            className="phone-main"
+            role="tabpanel"
+            id="driver-panel-papers"
+            aria-labelledby="driver-tab-papers"
+          >
+            <p className="kicker">PAPERWORK</p>
+            <DriverPapersPanel driver={driver} load={load} />
+          </div>
+        ) : (
+        <div
+          className="phone-main"
+          role="tabpanel"
+          id="driver-panel-today"
+          aria-labelledby="driver-tab-today"
+        >
           <p className="kicker">TODAY’S ASSIGNMENT</p>
           <div className="driver-greeting">
             <h1>Hi, {driver.name.split(" ")[0]}</h1>
@@ -1301,14 +1352,16 @@ function DriverPage({
             </div>
           </section>
         </div>
+        )}
       </div>
       <aside className="driver-notes">
         <p className="kicker">RESPONSIVE DRIVER WORKFLOW</p>
         <h1>Dispatch reaches the cab instantly.</h1>
         <p>
           This focused interface lets a driver acknowledge the load, see
-          appointment and freight details, open the route, and monitor practical
-          HOS—without exposing the dispatcher’s full workspace.
+          appointment and freight details, open the route, keep licence, carrier
+          and load paperwork on hand, and monitor practical HOS—without exposing
+          the dispatcher’s full workspace.
         </p>
         <ul>
           <li>
@@ -1318,6 +1371,10 @@ function DriverPage({
           <li>
             <Check />
             Duty and route state visible
+          </li>
+          <li>
+            <Check />
+            Licence, CVOR, insurance and load papers in one tab
           </li>
           <li>
             <Check />
