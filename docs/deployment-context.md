@@ -64,6 +64,7 @@ browser ──▶ web-server :8080
               ├── /healthz             → own health check
               ├── /api/telemetry/*     → simulator      :7071
               ├── /api/traffic/*       → gateway        :7072
+              ├── /api/ai/*            → gateway        :7072  (Authorization forwarded)
               └── /api/*               → solver         :7070
 ```
 
@@ -119,6 +120,9 @@ sync.
 | `SIMULATOR_PORT` / `SIMULATOR_HOST` | 7071 / 127.0.0.1 | simulator bind |
 | `SIMULATOR_SEED` | 20260913 | simulator event randomisation seed |
 | `INTEGRATION_PORT` / `INTEGRATION_HOST` | 7072 / 127.0.0.1 | gateway bind |
+| `SPUR_API_KEY` | none | gateway AI calls; AI is reported not configured without it |
+| `SPUR_MODEL_*` / `SPUR_TIMEOUT_MS` | see `.env.example` | gateway model selection and per-call timeout |
+| `SUPABASE_URL` / `SUPABASE_PUBLISHABLE_KEY` | `VITE_SUPABASE_*` | gateway verification of AI callers |
 | `JAVA_HOME` | auto-discovered | solver build/run scripts |
 
 ---

@@ -54,7 +54,7 @@ export type BackhaulSuggestion = {
 
 export type ProviderStatus = {
   id: string;
-  category: "TMS" | "ELD / Telematics" | "Routing" | "Traffic" | "Loading" | "Database";
+  category: "TMS" | "ELD / Telematics" | "Routing" | "Traffic" | "Loading" | "AI" | "Database";
   provider: string;
   mode: "live" | "demo" | "fallback" | "ready";
   status: "connected" | "degraded" | "available";

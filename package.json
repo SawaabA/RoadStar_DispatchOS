@@ -9,7 +9,7 @@
     "dev:full": "concurrently --kill-others-on-fail -n SOLVER,SIM,INTEGRATIONS,WEB -c yellow,cyan,magenta,green \"npm:solver\" \"npm:simulator\" \"npm:integrations\" \"npm:dev\"",
     "solver": "node services/loading-solver/run.mjs",
     "simulator": "node services/telematics-simulator/server.mjs",
-    "integrations": "node services/integration-gateway/server.mjs",
+    "integrations": "node --env-file-if-exists=.env --env-file-if-exists=.env.local services/integration-gateway/server.mjs",
     "start": "node services/web-server/server.mjs",
     "build": "tsc -b && vite build",
     "test": "vitest run",

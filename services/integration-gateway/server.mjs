@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
+import { aiMetrics, aiReadiness, AiError, authenticate, checkRateLimit, readJson, requireRole } from "./ai.mjs";
 
 const port = Number(process.env.INTEGRATION_PORT || 7072);
 const host = process.env.INTEGRATION_HOST || "127.0.0.1";
@@ -15,12 +16,12 @@ const providerChecks = [
 const cacheMs = 60_000;
 let cache;
 let routingHealthCache;
-const metrics = { requests: 0, errors: 0, trafficFetches: 0, routingRequests: 0 };
+const metrics = { requests: 0, errors: 0, trafficFetches: 0, routingRequests: 0, aiRejected: 0 };
 
 const baseHeaders = {
   "Access-Control-Allow-Origin": allowedOrigin,
-  "Access-Control-Allow-Headers": "Content-Type, X-Request-ID",
-  "Access-Control-Allow-Methods": "GET, OPTIONS",
+  "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Request-ID",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Content-Type": "application/json; charset=utf-8",
   "X-Content-Type-Options": "nosniff",
 };
@@ -129,14 +130,41 @@ async function checkRoutingProvider() {
   return value;
 }
 
+// Authenticated AI features, keyed by path. Each entry names the roles allowed
+// to call it and receives the verified caller and the parsed JSON body.
+const aiRoutes = new Map();
+
+async function handleAiPost(request, response, url, requestId) {
+  const route = aiRoutes.get(url.pathname);
+  if (!route) { writeJson(response, 404, { error: "Not found" }, requestId); return; }
+  try {
+    const identity = await authenticate(request);
+    requireRole(identity, route.roles);
+    checkRateLimit(identity.userId);
+    const body = await readJson(request);
+    writeJson(response, 200, await route.handle({ identity, body, requestId }), requestId, { "Cache-Control": "no-store" });
+  } catch (error) {
+    if (error instanceof AiError) {
+      metrics.aiRejected += 1;
+      const extra = error.status === 429 ? { "Retry-After": String(error.details.retryAfterSeconds ?? 60) } : {};
+      writeJson(response, error.status, { error: error.message, code: error.code, ...error.details }, requestId, extra);
+      return;
+    }
+    metrics.errors += 1;
+    log("error", "ai_failure", { requestId, path: url.pathname, message: error instanceof Error ? error.message : "Unknown failure" });
+    writeJson(response, 500, { error: "RoadStar AI failed", code: "internal" }, requestId);
+  }
+}
+
 const server = createServer(async (request, response) => {
   const requestId = String(request.headers["x-request-id"] || randomUUID());
   const startedAt = Date.now();
   metrics.requests += 1;
   response.on("finish", () => log("info", "request", { requestId, method: request.method, path: request.url, status: response.statusCode, durationMs: Date.now() - startedAt }));
   if (request.method === "OPTIONS") { response.writeHead(204, { ...baseHeaders, "X-Request-ID": requestId }); response.end(); return; }
-  if (request.method !== "GET") { writeJson(response, 405, { error: "Method not allowed" }, requestId, { Allow: "GET, OPTIONS" }); return; }
   const url = new URL(request.url || "/", "http://roadstar.local");
+  if (request.method === "POST" && url.pathname.startsWith("/api/ai/")) { await handleAiPost(request, response, url, requestId); return; }
+  if (request.method !== "GET") { writeJson(response, 405, { error: "Method not allowed" }, requestId, { Allow: "GET, OPTIONS" }); return; }
 
   if (url.pathname === "/healthz" || url.pathname === "/api/traffic/health") {
     writeJson(response, 200, { status: "ok", provider: "ontario-511", cached: Boolean(cache) }, requestId);
@@ -149,12 +177,16 @@ const server = createServer(async (request, response) => {
     writeJson(response, ready ? 200 : 503, { status: ready ? "ready" : "not_ready", routing }, requestId);
     return;
   }
+  if (url.pathname === "/api/ai/health") {
+    writeJson(response, 200, aiReadiness(), requestId, { "Cache-Control": "no-store" });
+    return;
+  }
   if (url.pathname === "/api/integrations/health") {
     const [external, routing] = await Promise.all([
       Promise.all(providerChecks.map(checkExternalProvider)),
       checkRoutingProvider(),
     ]);
-    writeJson(response, 200, { status: "ok", checkedAt: new Date().toISOString(), providers: [...external, routing, { id: "traffic", provider: "Ontario 511", status: "connected" }] }, requestId, { "Cache-Control": "no-store" });
+    writeJson(response, 200, { status: "ok", checkedAt: new Date().toISOString(), providers: [...external, routing, { id: "traffic", provider: "Ontario 511", status: "connected" }, (({ id, provider, status }) => ({ id, provider, status }))(aiReadiness())] }, requestId, { "Cache-Control": "no-store" });
     return;
   }
   if (url.pathname === "/api/traffic/incidents") {
@@ -181,7 +213,7 @@ const server = createServer(async (request, response) => {
     return;
   }
   if (url.pathname === "/metrics") {
-    const body = Object.entries(metrics).map(([name, value]) => `roadstar_integration_${name}_total ${value}`).join("\n") + "\n";
+    const body = Object.entries({ ...metrics, ...aiMetrics() }).map(([name, value]) => `roadstar_integration_${name}_total ${value}`).join("\n") + "\n";
     response.writeHead(200, { "Content-Type": "text/plain; version=0.0.4", "X-Content-Type-Options": "nosniff", "X-Request-ID": requestId });
     response.end(body);
     return;
@@ -189,7 +221,7 @@ const server = createServer(async (request, response) => {
   writeJson(response, 404, { error: "Not found" }, requestId);
 });
 
-server.listen(port, host, () => log("info", "ready", { host, port, routingConfigured: Boolean(routingBaseUrl) }));
+server.listen(port, host, () => log("info", "ready", { host, port, routingConfigured: Boolean(routingBaseUrl), ai: aiReadiness().status }));
 
 function shutdown(signal) {
   log("info", "shutdown", { signal });
