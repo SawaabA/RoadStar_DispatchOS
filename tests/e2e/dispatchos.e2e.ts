@@ -10,6 +10,9 @@ test.beforeEach(async ({ page }) => {
 test("all primary workspaces render without serious accessibility violations", async ({
   page,
 }) => {
+  // Eleven workspaces, each with a full axe sweep. ~18s locally but past the
+  // 30s default on a CI runner, where it failed on the last workspace.
+  test.slow();
   const runtimeErrors: string[] = [];
   page.on("pageerror", (error) => runtimeErrors.push(error.message));
   page.on("console", (message) => {
