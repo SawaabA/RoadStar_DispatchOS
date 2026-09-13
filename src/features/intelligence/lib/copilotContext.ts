@@ -44,6 +44,9 @@ const money = (value: number) =>
   new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 }).format(value);
 
 function exceptionRefs(exception: OperationalException, state: DispatchState, impacts: ReplanImpact[]): CopilotRef[] {
+  if (exception.id.startsWith("DOCUMENT-")) {
+    return state.loads.some((load) => load.id === exception.entityId) ? [{ type: "load", id: exception.entityId }] : [];
+  }
   if (exception.id.startsWith("LOAD-")) return [{ type: "load", id: exception.entityId }];
   if (exception.id.startsWith("HOS-")) return [{ type: "driver", id: exception.entityId }];
   if (exception.type === "detention") {

@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { DispatchState } from "../../dispatch/types";
 import { buildBackhaulSuggestions, buildReplanImpacts, deriveExceptions } from "../lib/intelligence";
 import { createInjectedClosure, fetchTrafficIncidents, type TrafficResult } from "../lib/trafficProvider";
+import type { OperationalException } from "../types";
+
+const NO_EXCEPTIONS: OperationalException[] = [];
 
 const emptyResult: TrafficResult = {
   incidents: [],
@@ -10,7 +13,9 @@ const emptyResult: TrafficResult = {
   message: "Traffic has not loaded yet.",
 };
 
-export function useRoadIntelligence(state: DispatchState) {
+// extraExceptions lets other features, such as load documents, join the same
+// inbox without the traffic and dispatch rules knowing about them.
+export function useRoadIntelligence(state: DispatchState, extraExceptions: OperationalException[] = NO_EXCEPTIONS) {
   const [traffic, setTraffic] = useState<TrafficResult>(emptyResult);
   const [injected, setInjected] = useState<TrafficResult["incidents"]>([]);
   const [loading, setLoading] = useState(true);
@@ -47,7 +52,7 @@ export function useRoadIntelligence(state: DispatchState) {
     refresh,
     injectClosure,
     impacts: buildReplanImpacts(state, effectiveTraffic.incidents),
-    exceptions: deriveExceptions(state, effectiveTraffic.incidents),
+    exceptions: [...deriveExceptions(state, effectiveTraffic.incidents), ...extraExceptions],
     backhauls: buildBackhaulSuggestions(state),
-  }}, [state, traffic, injected, loading, refresh, injectClosure]);
+  }}, [state, traffic, injected, loading, refresh, injectClosure, extraExceptions]);
 }

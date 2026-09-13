@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { AiError, MODELS, spurChat } from "./ai.mjs";
+import { AiError, MODELS, parseModelJson, spurChat } from "./ai.mjs";
 
 // The copilot phrases facts RoadStar has already computed. It never derives
 // hours, distances, times or charges: the browser sends the deterministic
@@ -116,15 +116,6 @@ export function validateCopilotAnswer(parsed, request, modelUsed) {
     fallback: false,
     unverified: { citations: invalidCitations, references, numbers },
   };
-}
-
-function parseModelJson(content) {
-  const unfenced = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-  try {
-    return JSON.parse(unfenced);
-  } catch {
-    throw new AiError(502, "invalid_output", "The copilot returned malformed output.");
-  }
 }
 
 export async function handleCopilot({ identity, body, requestId }) {

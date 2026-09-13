@@ -35,6 +35,10 @@ import {
 import { useDispatchOperations } from "../features/dispatch/hooks/useDispatchOperations";
 import { useRoadIntelligence } from "../features/intelligence/hooks/useRoadIntelligence";
 import { IntelligenceWorkspace } from "../features/intelligence/components/IntelligenceWorkspace";
+import { LoadDocumentsPanel } from "../features/documents/components/LoadDocumentsPanel";
+import { PodCapture } from "../features/documents/components/PodCapture";
+import { useLoadDocuments } from "../features/documents/hooks/useLoadDocuments";
+import { documentExceptions } from "../features/documents/lib/documentExceptions";
 import { AnalyticsWorkspace } from "../features/intelligence/components/AnalyticsWorkspace";
 import { IntegrationsWorkspace } from "../features/intelligence/components/IntegrationsWorkspace";
 import type {
@@ -721,7 +725,7 @@ function DispatchBoard({
   );
 }
 
-function LoadsPage({ ops }: { ops: ReturnType<typeof useDispatchOperations> }) {
+function LoadsPage({ ops, documents }: { ops: ReturnType<typeof useDispatchOperations>; documents: ReturnType<typeof useLoadDocuments> }) {
   const [query, setQuery] = useState(""),
     rows = ops.state.loads.filter((l) =>
       `${l.billNumber}${l.customer}${l.origin}${l.destination}`
@@ -741,6 +745,7 @@ function LoadsPage({ ops }: { ops: ReturnType<typeof useDispatchOperations> }) {
         </div>
         <button className="btn primary" disabled title="Load creation is planned for the next phase">+ New load</button>
       </div>
+      <LoadDocumentsPanel documents={documents.documents} loads={ops.state.loads} signedIn={Boolean(ops.userEmail)} error={documents.error} />
       <section className="surface table-surface">
         <div className="table-toolbar">
           <div className="search">
@@ -1115,9 +1120,11 @@ function DetentionPage({
 function DriverPage({
   ops,
   onNavigate,
+  documents,
 }: {
   ops: ReturnType<typeof useDispatchOperations>;
   onNavigate: (v: View) => void;
+  documents: ReturnType<typeof useLoadDocuments>["documents"];
 }) {
   const [showStopDetails, setShowStopDetails] = useState(false);
   const [actionPending, setActionPending] = useState(false);
@@ -1240,6 +1247,7 @@ function DriverPage({
           </div>
           {ops.actionError && <p className="driver-action-error" role="alert">{ops.actionError}</p>}
           {showStopDetails && <div className="driver-stop-details" role="status"><b>Next stop: {load.destination}</b><span>Deliver by {fmtTime(load.deliveryEnd)} · {load.description}</span></div>}
+          {(assignment.status === "accepted" || assignment.status === "in_transit") && <PodCapture loadId={load.id} organizationId={ops.organizationId} signedIn={Boolean(ops.userEmail)} documents={documents} />}
           <section className="mobile-hos">
             <div>
               <p className="kicker">HOURS OF SERVICE</p>
@@ -1396,7 +1404,9 @@ function AuthModal({
 
 export default function App() {
   const ops = useDispatchOperations(),
-    intelligence = useRoadIntelligence(ops.state),
+    loadDocuments = useLoadDocuments(ops.organizationId),
+    documentAlerts = useMemo(() => documentExceptions(loadDocuments.documents, ops.state.loads), [loadDocuments.documents, ops.state.loads]),
+    intelligence = useRoadIntelligence(ops.state, documentAlerts),
     [view, setView] = useState<View>(() => {
       const requested = window.location.hash.slice(1) as View;
       return NAV.some((item) => item.id === requested) ? requested : "overview";
@@ -1529,11 +1539,11 @@ export default function App() {
         <div className="view-container">
           {view === "overview" && <Overview ops={ops} intelligence={intelligence} onNavigate={setView} />}{" "}
           {view === "dispatch" && <DispatchBoard ops={ops} />}{" "}
-          {view === "loads" && <LoadsPage ops={ops} />}{" "}
+          {view === "loads" && <LoadsPage ops={ops} documents={loadDocuments} />}{" "}
           {view === "fleet" && <FleetPage ops={ops} />}{" "}
           {view === "map" && <MapPage ops={ops} intelligence={intelligence} />}{" "}
           {view === "detention" && <DetentionPage ops={ops} />}{" "}
-          {view === "driver" && <DriverPage ops={ops} onNavigate={setView} />}{" "}
+          {view === "driver" && <DriverPage ops={ops} onNavigate={setView} documents={loadDocuments.documents} />}{" "}
           {view === "intelligence" && <IntelligenceWorkspace ops={ops} intelligence={intelligence} />}{" "}
           {view === "analytics" && <AnalyticsWorkspace ops={ops} />}{" "}
           {view === "integrations" && <IntegrationsWorkspace ops={ops} trafficLive={intelligence.traffic.source === "ontario-511"} />}{" "}

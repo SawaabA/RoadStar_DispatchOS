@@ -127,6 +127,15 @@ test("copilot shows RoadStar's computed facts when no one is signed in", async (
   expect(serious.map((item) => item.id)).toEqual([]);
 });
 
+test("document features ask a signed-out user to sign in instead of failing", async ({ page }) => {
+  await page.getByRole("button", { name: /^Load board/ }).click();
+  await expect(page.getByRole("heading", { name: "Load documents" })).toBeVisible();
+  await expect(page.getByText("Sign in to see proof-of-delivery photos and rate confirmations.")).toBeVisible();
+
+  await page.getByRole("button", { name: /^Driver view/ }).click();
+  await expect(page.getByText("Sign in to attach a proof of delivery.")).toBeVisible();
+});
+
 test("historical replay labels opportunity rather than guaranteed savings", async ({ page }) => {
   await page.getByRole("button", { name: /^KPI & replay/ }).click();
   await page.getByRole("button", { name: "Run lane-match replay" }).click();

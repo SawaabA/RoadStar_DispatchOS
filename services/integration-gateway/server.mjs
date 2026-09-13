@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { aiMetrics, aiReadiness, AiError, authenticate, checkRateLimit, readJson, requireRole } from "./ai.mjs";
 import { handleCopilot } from "./copilot.mjs";
+import { handleExtract } from "./extract.mjs";
 
 const port = Number(process.env.INTEGRATION_PORT || 7072);
 const host = process.env.INTEGRATION_HOST || "127.0.0.1";
@@ -136,6 +137,8 @@ async function checkRoutingProvider() {
 const aiRoutes = new Map([
   // Viewers may ask: the copilot only narrates data they can already read.
   ["/api/ai/copilot", { roles: ["admin", "dispatcher", "viewer"], handle: handleCopilot }],
+  // Drivers may extract only proof of delivery; the handler enforces that per schema.
+  ["/api/ai/extract", { roles: ["admin", "dispatcher", "driver"], handle: handleExtract }],
 ]);
 
 async function handleAiPost(request, response, url, requestId) {

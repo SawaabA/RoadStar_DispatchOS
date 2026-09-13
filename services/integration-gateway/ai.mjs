@@ -233,3 +233,24 @@ export function aiReadiness() {
 }
 
 export const aiMetrics = () => ({ ...counters });
+
+// Models sometimes wrap JSON in a markdown fence even in JSON mode.
+export function parseModelJson(content) {
+  const unfenced = String(content).trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  try {
+    return JSON.parse(unfenced);
+  } catch {
+    throw new AiError(502, "invalid_output", "The model returned malformed output.");
+  }
+}
+
+// Calls Supabase as the verified caller, so row-level security and storage
+// policies decide what the gateway may read or write on their behalf.
+export function supabaseFetch(path, identity, init = {}) {
+  if (!supabaseUrl || !supabaseKey) throw new AiError(503, "auth_not_configured", "RoadStar AI authentication is not configured.");
+  return fetch(`${supabaseUrl}${path}`, {
+    ...init,
+    headers: { apikey: supabaseKey, Authorization: `Bearer ${identity.token}`, ...(init.headers ?? {}) },
+    signal: init.signal ?? AbortSignal.timeout(10_000),
+  });
+}
