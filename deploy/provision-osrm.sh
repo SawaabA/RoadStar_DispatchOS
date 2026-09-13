@@ -12,9 +12,40 @@ if [ "$available_kb" -lt 20971520 ]; then
   echo "Need at least 20 GB free under $TARGET; only $((available_kb / 1024 / 1024)) GB is available." >&2
   exit 1
 fi
-if [ "$memory_kb" -lt 8388608 ]; then
-  echo "Need at least 8 GB combined RAM and swap for guarded Ontario preprocessing; found $((memory_kb / 1024 / 1024)) GB." >&2
-  exit 1
+required_memory_kb=8388608
+if [ "$memory_kb" -lt "$required_memory_kb" ]; then
+  # OSRM extraction is memory intensive. Small production droplets can safely
+  # satisfy the preprocessing guard with a dedicated, persistent swapfile.
+  # Never replace an existing inactive file automatically: it may belong to an
+  # administrator and must be inspected manually.
+  if [ "$(id -u)" -ne 0 ]; then
+    echo "Need at least 8 GB combined RAM and swap; found $((memory_kb / 1024 / 1024)) GB. Run this provisioner as root so it can create dedicated swap." >&2
+    exit 1
+  fi
+  swapfile=/swapfile-roadstar
+  missing_kb=$((required_memory_kb - memory_kb + 1048576))
+  swap_gb=$(((missing_kb + 1048575) / 1048576))
+  if [ "$swap_gb" -lt 4 ]; then swap_gb=4; fi
+  if swapon --show=NAME --noheadings | grep -Fxq "$swapfile"; then
+    echo "RoadStar swapfile is already active."
+  elif [ -e "$swapfile" ]; then
+    echo "$swapfile exists but is not active; refusing to overwrite it. Inspect or activate it manually." >&2
+    exit 1
+  else
+    echo "Creating a dedicated ${swap_gb} GB RoadStar swapfile for Ontario preprocessing."
+    fallocate -l "${swap_gb}G" "$swapfile"
+    chmod 600 "$swapfile"
+    mkswap "$swapfile"
+    swapon "$swapfile"
+    if ! grep -Fq "$swapfile none swap sw 0 0" /etc/fstab; then
+      printf '%s\n' "$swapfile none swap sw 0 0" >> /etc/fstab
+    fi
+  fi
+  memory_kb=$(awk '/MemTotal|SwapTotal/ {sum += $2} END {print sum}' /proc/meminfo)
+  if [ "$memory_kb" -lt "$required_memory_kb" ]; then
+    echo "Need at least 8 GB combined RAM and swap after provisioning; found $((memory_kb / 1024 / 1024)) GB." >&2
+    exit 1
+  fi
 fi
 
 mkdir -p "$DATA"
