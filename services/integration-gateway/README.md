@@ -43,14 +43,16 @@ AI features are served as `POST /api/ai/*`. Every request must carry the caller'
 
 `GET /api/ai/health` reports whether the key and caller verification are configured, and the outcome of the most recent model call. It never makes a live model call.
 
+`POST /api/ai/copilot` (admin, dispatcher, viewer) narrates one of five fixed questions from facts the browser has already computed: open exceptions, unassigned-load feasibility, HOS clocks, detention, and the optimizer's proposal. Every answer is checked before it is returned: citations must resolve to a known load, driver or truck, identifier-shaped tokens must exist, and any measured figure must appear in the facts. An answer that fails is still returned, marked `grounded: false`. If every model fails the response is `fallback: true` and the browser shows the facts unnarrated. Answers are cached per organization for five minutes.
+
 | Variable | Default | Purpose |
 |---|---|---|
 | `SPUR_API_KEY` | none | Required for AI features |
 | `SPUR_BASE_URL` | `https://ai.spuric.com/v1` | OpenAI-compatible endpoint |
 | `SPUR_MODEL_EXTRACT` | `spur-glm-5-2` | Text extraction from documents |
 | `SPUR_MODEL_VISION` | `spur-vision` | Scanned documents and photos |
-| `SPUR_MODEL_COPILOT` | `hari-verified` | Dispatcher copilot |
-| `SPUR_MODEL_COPILOT_FALLBACK` | `spur-glm-5-2` | Copilot fallback |
+| `SPUR_MODEL_COPILOT` | `spur-glm-5-2` | Dispatcher copilot (measured 2-4 s on real prompts) |
+| `SPUR_MODEL_COPILOT_FALLBACK` | `spur-glm-air` | Copilot fallback |
 | `SPUR_TIMEOUT_MS` | `8000` | Per-call timeout |
 | `AI_RATE_LIMIT_PER_MINUTE` | `20` | Per-user request budget |
 | `SUPABASE_URL` / `SUPABASE_PUBLISHABLE_KEY` | `VITE_SUPABASE_*` | Caller verification |

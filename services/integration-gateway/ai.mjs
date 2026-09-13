@@ -16,8 +16,12 @@ const supabaseKey = process.env.SUPABASE_PUBLISHABLE_KEY || process.env.VITE_SUP
 export const MODELS = Object.freeze({
   extract: process.env.SPUR_MODEL_EXTRACT || "spur-glm-5-2",
   vision: process.env.SPUR_MODEL_VISION || "spur-vision",
-  copilot: process.env.SPUR_MODEL_COPILOT || "hari-verified",
-  copilotFallback: process.env.SPUR_MODEL_COPILOT_FALLBACK || "spur-glm-5-2",
+  // Measured on the real copilot prompts: hari-verified returned no usable
+  // answer for any of the five questions, so every reply came from the fallback
+  // after 6-9 s. spur-glm-5-2 answered all five in 2-4 s, inside the brief's
+  // 6 s budget. hari-verified stays selectable through SPUR_MODEL_COPILOT.
+  copilot: process.env.SPUR_MODEL_COPILOT || "spur-glm-5-2",
+  copilotFallback: process.env.SPUR_MODEL_COPILOT_FALLBACK || "spur-glm-air",
 });
 
 // Models SPUR serves from its own infrastructure. Several catalogue entries are

@@ -3,6 +3,7 @@ import type { ReturnTypeOfDispatchOperations } from "../viewTypes";
 import type { BackhaulSuggestion, OperationalException, ReplanImpact } from "../types";
 import type { useRoadIntelligence } from "../hooks/useRoadIntelligence";
 import { DEFAULT_OPTIMIZATION_WEIGHTS } from "../../dispatch/lib/optimizer";
+import { CopilotPanel } from "./CopilotPanel";
 
 type Intelligence = ReturnType<typeof useRoadIntelligence>;
 
@@ -35,6 +36,8 @@ export function IntelligenceWorkspace({ ops, intelligence }: { ops: ReturnTypeOf
       <span><Clock3 /><b>{intelligence.backhauls.length}</b><small>backhaul options</small></span>
       <span><TrafficCone /><b>{intelligence.traffic.incidents.length}</b><small>{intelligence.traffic.source === "ontario-511" ? "Ontario 511 events" : "demo events"}</small></span>
     </div>
+
+    {ops.memberRole !== "driver" && <CopilotPanel ops={ops} intelligence={intelligence} />}
 
     <div className="intelligence-grid">
       <section className="surface intelligence-panel">

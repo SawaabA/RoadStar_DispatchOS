@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { aiMetrics, aiReadiness, AiError, authenticate, checkRateLimit, readJson, requireRole } from "./ai.mjs";
+import { handleCopilot } from "./copilot.mjs";
 
 const port = Number(process.env.INTEGRATION_PORT || 7072);
 const host = process.env.INTEGRATION_HOST || "127.0.0.1";
@@ -132,7 +133,10 @@ async function checkRoutingProvider() {
 
 // Authenticated AI features, keyed by path. Each entry names the roles allowed
 // to call it and receives the verified caller and the parsed JSON body.
-const aiRoutes = new Map();
+const aiRoutes = new Map([
+  // Viewers may ask: the copilot only narrates data they can already read.
+  ["/api/ai/copilot", { roles: ["admin", "dispatcher", "viewer"], handle: handleCopilot }],
+]);
 
 async function handleAiPost(request, response, url, requestId) {
   const route = aiRoutes.get(url.pathname);

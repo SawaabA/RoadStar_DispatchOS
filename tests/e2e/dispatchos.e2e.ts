@@ -113,6 +113,20 @@ test("dispatcher can review and record an incident re-plan decision", async ({ p
   await expect(page.locator(".decision-log")).toContainText("Approved 35-minute ETA re-plan");
 });
 
+test("copilot shows RoadStar's computed facts when no one is signed in", async ({ page }) => {
+  await page.getByRole("button", { name: /^Intelligence/ }).click();
+  const question = page.getByRole("button", { name: "What is our detention exposure?" });
+  await question.click();
+  await expect(question).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByText("Sign in to get a narrated answer.")).toBeVisible();
+  await expect(page.locator(".copilot-summary")).toContainText("Billable detention across");
+  await expect(page.locator(".copilot-facts li").first()).toContainText("billable min");
+
+  const results = await new AxeBuilder({ page }).include(".copilot-panel").analyze();
+  const serious = results.violations.filter((item) => ["critical", "serious"].includes(item.impact ?? ""));
+  expect(serious.map((item) => item.id)).toEqual([]);
+});
+
 test("historical replay labels opportunity rather than guaranteed savings", async ({ page }) => {
   await page.getByRole("button", { name: /^KPI & replay/ }).click();
   await page.getByRole("button", { name: "Run lane-match replay" }).click();
