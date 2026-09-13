@@ -37,6 +37,7 @@ import { useRoadIntelligence } from "../features/intelligence/hooks/useRoadIntel
 import { IntelligenceWorkspace } from "../features/intelligence/components/IntelligenceWorkspace";
 import { AnalyticsWorkspace } from "../features/intelligence/components/AnalyticsWorkspace";
 import { IntegrationsWorkspace } from "../features/intelligence/components/IntegrationsWorkspace";
+import { NewLoadModal } from "../features/dispatch/components/NewLoadModal";
 import type {
   DispatchCandidate,
   DispatchLoad,
@@ -63,10 +64,10 @@ const fmtTime = (value: string) =>
     hour: "numeric",
     minute: "2-digit",
   }).format(new Date(value));
-const fmtMoney = (value: number) =>
+const fmtMoney = (value: number, currency: "CAD" | "USD" = "CAD") =>
   new Intl.NumberFormat("en-CA", {
     style: "currency",
-    currency: "CAD",
+    currency,
     maximumFractionDigits: 0,
   }).format(value);
 const statusLabel = (value: string) => value.replaceAll("_", " ");
@@ -723,11 +724,16 @@ function DispatchBoard({
 
 function LoadsPage({ ops }: { ops: ReturnType<typeof useDispatchOperations> }) {
   const [query, setQuery] = useState(""),
-    rows = ops.state.loads.filter((l) =>
-      `${l.billNumber}${l.customer}${l.origin}${l.destination}`
-        .toLowerCase()
-        .includes(query.toLowerCase()),
-    );
+    [creating, setCreating] = useState(false),
+    [editing, setEditing] = useState<DispatchLoad | null>(null),
+    [created, setCreated] = useState(""),
+    [statusFilter, setStatusFilter] = useState("active"),
+    [sort, setSort] = useState("pickup"),
+    rows = ops.state.loads.filter((load) => {
+      const matchesQuery = `${load.billNumber}${load.customer}${load.origin}${load.destination}`.toLowerCase().includes(query.toLowerCase());
+      const matchesStatus = statusFilter === "all" || statusFilter === "active" && !["completed", "cancelled", "archived"].includes(load.status) || load.status === statusFilter;
+      return matchesQuery && matchesStatus;
+    }).sort((left, right) => sort === "value" ? right.rate - left.rate : sort === "weight" ? right.weightLbs - left.weightLbs : Date.parse(left.pickupStart) - Date.parse(right.pickupStart));
   return (
     <div className="page fade-in">
       <div className="page-heading">
@@ -739,8 +745,9 @@ function LoadsPage({ ops }: { ops: ReturnType<typeof useDispatchOperations> }) {
             view.
           </p>
         </div>
-        <button className="btn primary" disabled title="Load creation is planned for the next phase">+ New load</button>
+        <button className="btn primary" disabled={!ops.canManageDispatch} title={ops.canManageDispatch ? "Create a dispatch-ready load" : "Your role has read-only access"} onClick={() => setCreating(true)}>+ New load</button>
       </div>
+      {created && <p className="action-success" role="status">{created} was created and is ready for dispatch.</p>}
       <section className="surface table-surface">
         <div className="table-toolbar">
           <div className="search">
@@ -752,47 +759,45 @@ function LoadsPage({ ops }: { ops: ReturnType<typeof useDispatchOperations> }) {
               placeholder="Search bill, customer, or city"
             />
           </div>
-          <button className="btn secondary" disabled title="Advanced filters are planned for the next phase">
-            <ListFilter />
-            Filters
-          </button>
+          <div className="load-filters"><ListFilter /><select aria-label="Filter loads by status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="active">Active</option><option value="all">All statuses</option><option value="unassigned">Unassigned</option><option value="assigned">Assigned</option><option value="in_transit">In transit</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option><option value="archived">Archived</option></select><select aria-label="Sort loads" value={sort} onChange={(event) => setSort(event.target.value)}><option value="pickup">Pickup time</option><option value="value">Highest value</option><option value="weight">Highest weight</option></select></div>
         </div>
-        <div className="data-table">
-          <div className="table-row table-head">
-            <span>LOAD</span>
-            <span>ROUTE</span>
-            <span>APPOINTMENT</span>
-            <span>FREIGHT</span>
-            <span>VALUE</span>
-            <span>STATUS</span>
+        <div className="data-table" role="table" aria-label="Dispatch loads">
+          <div className="table-row table-head" role="row">
+            <span role="columnheader">LOAD</span>
+            <span role="columnheader">ROUTE</span>
+            <span role="columnheader">APPOINTMENT</span>
+            <span role="columnheader">FREIGHT</span>
+            <span role="columnheader">VALUE</span>
+            <span role="columnheader">STATUS</span>
+            <span role="columnheader">ACTIONS</span>
           </div>
           {rows.map((l) => (
-            <div className="table-row" key={l.id}>
-              <span>
+            <div className="table-row" role="row" key={l.id}>
+              <span role="cell">
                 <b>{l.billNumber}</b>
                 <small>{l.customer}</small>
               </span>
-              <span>
+              <span role="cell">
                 <b>{l.origin}</b>
-                <small>→ {l.destination}</small>
+                <small>→ {l.destination}{l.additionalStops?.length ? ` · ${l.additionalStops.length} intermediate stop${l.additionalStops.length === 1 ? "" : "s"}` : ""}</small>
               </span>
-              <span>
+              <span role="cell">
                 <b>
                   {fmtTime(l.pickupStart)}–{fmtTime(l.pickupEnd)}
                 </b>
                 <small>Delivery {fmtTime(l.deliveryEnd)}</small>
               </span>
-              <span>
+              <span role="cell">
                 <b>{l.weightLbs.toLocaleString()} lb</b>
                 <small>
                   {l.pallets} pallets · {l.equipment}
                 </small>
               </span>
-              <span>
-                <b>{fmtMoney(l.rate)}</b>
-                <small>CAD</small>
+              <span role="cell">
+                <b>{fmtMoney(l.rate, l.currency)}</b>
+                <small>{l.currency ?? "CAD"}</small>
               </span>
-              <span>
+              <span role="cell">
                 <Badge
                   tone={
                     l.status === "completed"
@@ -807,11 +812,22 @@ function LoadsPage({ ops }: { ops: ReturnType<typeof useDispatchOperations> }) {
                   {statusLabel(l.status)}
                 </Badge>
               </span>
+              <span role="cell" className="load-row-actions">{ops.canManageDispatch && <><button disabled={l.status !== "unassigned"} onClick={() => setEditing(l)}>Edit</button><button onClick={() => { const duplicate = ops.duplicateLoad(l.id); if (duplicate) setCreated(duplicate.billNumber); }}>Duplicate</button>{l.status === "unassigned" && <button className="danger" onClick={() => ops.setLoadLifecycle(l.id, "cancelled")}>Cancel</button>}{["completed", "cancelled"].includes(l.status) && <button onClick={() => ops.setLoadLifecycle(l.id, "archived")}>Archive</button>}{l.status === "archived" && <button onClick={() => ops.setLoadLifecycle(l.id, "unassigned")}>Restore</button>}</>}</span>
             </div>
           ))}
           {!rows.length && <p className="empty-state">No loads match your search.</p>}
         </div>
       </section>
+      {creating && <NewLoadModal
+        existing={ops.state.loads}
+        onClose={() => setCreating(false)}
+        onCreate={(load) => {
+          const saved = ops.createLoad(load);
+          if (saved) setCreated(load.billNumber);
+          return saved;
+        }}
+      />}
+      {editing && <NewLoadModal existing={ops.state.loads} initial={editing} onClose={() => setEditing(null)} onCreate={(load) => { const saved = ops.updateLoad({ ...load, id: editing.id }); if (saved) setCreated(`${load.billNumber} changes`); return saved; }} />}
     </div>
   );
 }
@@ -1546,7 +1562,7 @@ export default function App() {
                 </div>
               }
             >
-              <LoaderWorkspace onPersistCargo={(values) => ops.saveP1Record("cargo_items", values)} />
+              <LoaderWorkspace dispatchLoads={ops.state.loads} onPersistCargo={(values) => ops.saveP1Record("cargo_items", values)} onSavePlan={ops.saveLoadingPlan} onLoadPlans={ops.listLoadingPlans} onApprovePlan={ops.approveLoadingPlan} />
             </Suspense>
           )}
         </div>

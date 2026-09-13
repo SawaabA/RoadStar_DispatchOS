@@ -18,12 +18,12 @@ jobs:
     name: Release gate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 21
@@ -42,7 +42,7 @@ jobs:
       matrix:
         service: [web, solver, simulator, integrations]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # GHCR requires a lowercase path; the repository name is mixed case.
       - name: Resolve image name
@@ -95,18 +95,20 @@ jobs:
       contents: read
       packages: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Require deployment configuration
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
         run: |
           missing=""
           [ -n "$DEPLOY_HOST" ] || missing="$missing DEPLOY_HOST"
           [ -n "$DEPLOY_USER" ] || missing="$missing DEPLOY_USER"
           [ -n "$DEPLOY_SSH_KEY" ] || missing="$missing DEPLOY_SSH_KEY"
+          [ -n "$DEPLOY_KNOWN_HOSTS" ] || missing="$missing DEPLOY_KNOWN_HOSTS"
           if [ -n "$missing" ]; then
             echo "::error::Missing required repository secrets:$missing. Images were published successfully; only the release to the droplet was skipped. See deploy/README.md."
             exit 1
@@ -131,23 +133,19 @@ jobs:
             exit 1
           fi
 
-          if [ -n "$DEPLOY_KNOWN_HOSTS" ]; then
-            printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          else
-            echo "::warning::DEPLOY_KNOWN_HOSTS is unset; trusting the host key on first use."
-            ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
-          fi
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
       - name: Resolve image prefix
         run: echo "IMAGE_PREFIX=${REGISTRY}/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
 
-      - name: Copy compose file
+      - name: Copy deployment files
         env:
           SSH_HOST: ${{ secrets.DEPLOY_HOST }}
           SSH_USER: ${{ secrets.DEPLOY_USER }}
           TARGET: ${{ vars.DEPLOY_PATH || '/opt/roadstar' }}
-        run: scp -o StrictHostKeyChecking=yes docker-compose.prod.yml "$SSH_USER@$SSH_HOST:$TARGET/docker-compose.prod.yml"
+        run: |
+          scp -o StrictHostKeyChecking=yes docker-compose.prod.yml docker-compose.osrm.yml deploy/monitor-roadstar.sh deploy/roadstar-monitor.service deploy/roadstar-monitor.timer "$SSH_USER@$SSH_HOST:$TARGET/"
 
       - name: Pull and restart
         env:
@@ -164,8 +162,15 @@ jobs:
           echo '$TOKEN' | docker login '$REGISTRY' -u '$ACTOR' --password-stdin
           export IMAGE_PREFIX='$IMAGE_PREFIX'
           export IMAGE_TAG='$TAG'
-          docker compose -f docker-compose.prod.yml pull --quiet
-          docker compose -f docker-compose.prod.yml up -d --remove-orphans
+          COMPOSE_FILES=(-f docker-compose.prod.yml)
+          if [ -f deploy/osrm/data/.prepared-version ]; then
+            echo 'Prepared Ontario OSRM graph found; enabling real road routing.'
+            COMPOSE_FILES+=(-f docker-compose.osrm.yml)
+          else
+            echo 'Ontario OSRM graph not present; deploying with presentation routing fallback.'
+          fi
+          docker compose "\${COMPOSE_FILES[@]}" pull --quiet
+          docker compose "\${COMPOSE_FILES[@]}" up -d --remove-orphans
           docker image prune -f
           docker logout '$REGISTRY'
           EOF
@@ -173,11 +178,16 @@ jobs:
       - name: Verify the deployment answers
         env:
           ORIGIN: ${{ vars.APP_ORIGIN || 'https://roadstardispatch.xyz' }}
+          ROADSTAR_BASE_URL: ${{ vars.APP_ORIGIN || 'https://roadstardispatch.xyz' }}
+          ROADSTAR_REQUIRE_REAL_ROUTING: ${{ vars.REQUIRE_REAL_ROUTING || 'false' }}
+          EXPECTED_SCHEMA_VERSION: "20260913090218"
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
         run: |
           for attempt in $(seq 1 12); do
             if curl -fsS --max-time 10 "$ORIGIN/healthz" > /dev/null; then
               echo "healthz OK after $attempt attempt(s)"
-              curl -fsS --max-time 15 "$ORIGIN/api/telemetry/health"
+              node scripts/verify-deployment.mjs
               exit 0
             fi
             sleep 10

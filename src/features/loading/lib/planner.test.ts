@@ -58,4 +58,47 @@ describe("browser loading plan", () => {
       }
     }
   });
+
+  it("creates real vertical layers for compatible stackable freight", () => {
+    const plan = createPlan([
+      { ...load, pallets: 2, weightLbs: 2000, palletLengthIn: 60, palletWidthIn: 40, palletHeightIn: 40, stackable: true, bearingLimitLbs: 1500 },
+    ], { ...trailer, lengthIn: 60, widthIn: 40 });
+
+    expect(plan.unplanned).toHaveLength(0);
+    expect(plan.items.map((item) => item.z).sort((a, b) => a - b)).toEqual([0, 40]);
+    expect(plan.usedFloorArea).toBe(2400);
+  });
+
+  it("rejects concentrated cargo that exceeds its floor-bearing limit", () => {
+    const plan = createPlan([{ ...load, weightLbs: 4000, palletLengthIn: 24, palletWidthIn: 24, floorBearingPsf: 500 }], trailer);
+    expect(plan.items).toHaveLength(0);
+    expect(plan.unplanned[0].unplannedReason).toMatch(/floor load/i);
+  });
+
+  it("keeps a large mixed manifest within physical limits", () => {
+    const manifest = Array.from({ length: 20 }, (_, index): Load => ({
+      ...load,
+      id: `MIX-${index}`,
+      pallets: 2,
+      weightLbs: 1200,
+      palletLengthIn: index % 3 === 0 ? 60 : 48,
+      palletWidthIn: index % 2 === 0 ? 40 : 36,
+      palletHeightIn: 40,
+      stop: (index % 4) + 1,
+      rotatable: true,
+      stackable: true,
+      bearingLimitLbs: 1800,
+      fragile: index % 7 === 0,
+    }));
+    const plan = createPlan(manifest, { ...trailer, lengthIn: 636, widthIn: 98, heightIn: 102, capacityLbs: 44500 }, "damage");
+    expect(plan.totalWeight).toBeLessThanOrEqual(44500);
+    for (const item of plan.items) {
+      expect(item.x).toBeGreaterThanOrEqual(0);
+      expect(item.y).toBeGreaterThanOrEqual(0);
+      expect(item.z).toBeGreaterThanOrEqual(0);
+      expect(item.x + item.length).toBeLessThanOrEqual(636);
+      expect(item.y + item.width).toBeLessThanOrEqual(98);
+      expect(item.z + item.height).toBeLessThanOrEqual(102);
+    }
+  });
 });

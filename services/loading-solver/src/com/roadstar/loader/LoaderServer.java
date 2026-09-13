@@ -24,11 +24,12 @@ public final class LoaderServer {
                    float frontAxleLimitLbs, float rearAxleLimitLbs, float axleDistanceIn, boolean axleModelVerified) {}
     record Load(String id, String destination, float weightLbs, int pallets, int stop,
                 int palletLengthIn, int palletWidthIn, int palletHeightIn,
-                boolean rotatable, boolean stackable, float bearingLimitLbs, boolean estimated) {}
+                boolean rotatable, boolean stackable, float bearingLimitLbs, float floorBearingPsf,
+                boolean fragile, boolean priority, boolean estimated) {}
     record PlanRequest(Trailer trailer, List<Load> loads) {}
     record Item(String id, String loadId, int x, int y, int z, int length, int width, int height,
                 float weightLbs, int stop, String destination, String color, boolean estimated,
-                boolean rotated, boolean invalid) {}
+                boolean rotated, boolean invalid, String unplannedReason) {}
     record PlanResponse(List<Item> items, List<Item> unplanned, float totalWeight,
                         float usedFloorArea, List<String> warnings, String engine) {}
 
@@ -72,35 +73,45 @@ public final class LoaderServer {
             container.setAxleDistance(t.axleDistanceIn);
         }
         Map<String, Load> byItem = new HashMap<>();
+        List<Item> rejected = new ArrayList<>();
         for (Load load : request.loads) {
             if (load == null || load.id == null || load.id.isBlank() || load.pallets <= 0 || load.weightLbs <= 0 ||
                 load.stop <= 0 || load.palletLengthIn <= 0 || load.palletWidthIn <= 0 || load.palletHeightIn <= 0) {
                 throw new IllegalArgumentException("Every load requires an id, positive pallet count, weight, stop, and pallet dimensions");
             }
             float weight = load.weightLbs / load.pallets;
+            float densityPsf = weight / (load.palletLengthIn * load.palletWidthIn) * 144;
             for (int i=1; i<=load.pallets; i++) {
                 String id = load.id + "-P" + String.format("%02d", i);
                 byItem.put(id, load);
+                if (load.floorBearingPsf > 0 && densityPsf > load.floorBearingPsf) {
+                    rejected.add(new Item(id, load.id, 0, 0, 0, load.palletLengthIn, load.palletWidthIn, load.palletHeightIn, weight, load.stop, load.destination, "#ff4d4d", load.estimated, false, true, "Floor-bearing limit exceeded."));
+                    continue;
+                }
                 solver.addItem().setExternID(id).setShipmentID(load.id)
                     .setLength(load.palletLengthIn).setWidth(load.palletWidthIn).setHeight(load.palletHeightIn)
                     .setWeight(weight).setSpinnable(load.rotatable)
-                    .setStackingWeightLimit(load.stackable ? load.bearingLimitLbs : 0)
-                    .setNbrOfAllowedStackedItems(load.stackable ? 10 : 0)
+                    .setStackingWeightLimit(load.stackable && !load.fragile ? load.bearingLimitLbs : 0)
+                    .setNbrOfAllowedStackedItems(load.stackable && !load.fragile ? 10 : 0)
                     .setLoadingLocation("LOC-0").setUnloadingLocation(String.format("LOC-%03d", load.stop));
             }
         }
         solver.executeLoadPlanning();
         Map<String, Item> uniquePlacements = new LinkedHashMap<>();
-        List<Item> rejected = new ArrayList<>();
         for (var report : solver.getReport().getContainerReports()) for (LPPackageEvent event : report.getPackageEvents()) {
             if (event.type() == LoadType.LOAD) uniquePlacements.put(event.id(), toItem(event, byItem.get(event.id())));
         }
         List<Item> placed = new ArrayList<>(uniquePlacements.values());
-        for (LPPackageEvent event : solver.getReport().getUnplannedPackages()) rejected.add(toItem(event, byItem.get(event.id())));
+        for (LPPackageEvent event : solver.getReport().getUnplannedPackages()) {
+            Item item = toItem(event, byItem.get(event.id()));
+            rejected.add(new Item(item.id, item.loadId, item.x, item.y, item.z, item.length, item.width, item.height, item.weightLbs, item.stop, item.destination, item.color, item.estimated, item.rotated, item.invalid, "xflp could not satisfy the selected geometry, stack, weight, or unloading constraints."));
+        }
         float totalWeight = (float) placed.stream().mapToDouble(Item::weightLbs).sum();
-        float floor = (float) placed.stream().mapToDouble(i -> i.length * i.width).sum();
+        float floor = (float) placed.stream().filter(i -> i.z == 0).mapToDouble(i -> i.length * i.width).sum();
         List<String> warnings = new ArrayList<>();
-        warnings.add("Pallet geometry and individual weights are estimated from shipment totals. Verify before operational use.");
+        if (request.loads.stream().anyMatch(load -> load == null || load.estimated)) {
+            warnings.add("Pallet geometry and individual weights are estimated from shipment totals. Verify before operational use.");
+        }
         if (!t.axleModelVerified) warnings.add("Axle geometry is not calibrated for this tractor pairing. Verify axle weights before release.");
         if (!rejected.isEmpty()) warnings.add(rejected.size() + " pallets could not be planned under the selected constraints.");
         return new PlanResponse(placed, rejected, totalWeight, floor, warnings, "xflp-0.7.7");
@@ -113,7 +124,7 @@ public final class LoaderServer {
         // RoadStar's shared contract uses X for trailer length and Y for width.
         return new Item(event.id(), load == null ? "unknown" : load.id, event.y(), event.x(), event.z(),
             event.l(), event.w(), event.h(), event.weight(), stop, load == null ? "Unknown" : load.destination,
-            colors[Math.floorMod(stop - 1, colors.length)], load == null || load.estimated, event.isRotatedPosition(), event.isInvalid());
+            colors[Math.floorMod(stop - 1, colors.length)], load == null || load.estimated, event.isRotatedPosition(), event.isInvalid(), null);
     }
 
     private static void cors(HttpExchange exchange) {

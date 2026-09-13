@@ -3,7 +3,8 @@ export type LoadStatus =
   | "assigned"
   | "in_transit"
   | "completed"
-  | "cancelled";
+  | "cancelled"
+  | "archived";
 export type AssetStatus = "available" | "assigned" | "maintenance" | "inactive";
 export type DutyStatus = "off_duty" | "sleeper" | "driving" | "on_duty";
 export type EquipmentType = "Dry Van" | "Reefer" | "Flatbed";
@@ -19,10 +20,36 @@ export type OptimizationWeights = {
 
 export type DecisionRecord = {
   id: string;
-  kind: "plan" | "replan" | "exception" | "backhaul" | "driver";
+  kind: "plan" | "replan" | "exception" | "backhaul" | "driver" | "load";
   summary: string;
   outcome: "accepted" | "rejected" | "acknowledged" | "started" | "declined";
   createdAt: string;
+};
+
+export type DispatchCargoItem = {
+  id: string;
+  label: string;
+  quantity: number;
+  lengthIn: number;
+  widthIn: number;
+  heightIn: number;
+  unitWeightLbs: number;
+  rotatable: boolean;
+  stackable: boolean;
+  maxStackWeightLbs?: number;
+  floorBearingPsf?: number;
+  clearanceIn?: number;
+  fragile?: boolean;
+  priority?: boolean;
+  stop?: number;
+};
+
+export type DispatchStop = {
+  id: string;
+  location: string;
+  point: Coordinates;
+  appointmentStart: string;
+  appointmentEnd: string;
 };
 
 export type OrganizationRole = "admin" | "dispatcher" | "driver" | "viewer";
@@ -46,7 +73,10 @@ export type DispatchLoad = {
   pallets: number;
   temperatureControlled: boolean;
   rate: number;
+  currency?: "CAD" | "USD";
   priority: "standard" | "high" | "critical";
+  additionalStops?: DispatchStop[];
+  cargoItems?: DispatchCargoItem[];
 };
 
 export type Driver = {

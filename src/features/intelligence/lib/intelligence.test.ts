@@ -44,4 +44,21 @@ describe("dispatch intelligence", () => {
     expect(providers.find((item) => item.id === "routing")?.mode).toBe("ready");
     expect(providers.find((item) => item.id === "traffic")?.mode).toBe("live");
   });
+
+  it("labels a connected routing engine as live and demo adapters as demo", () => {
+    const providers = providerStatuses({
+      cloud: true,
+      trafficLive: true,
+      simulatorLive: true,
+      solver: "xflp",
+      external: {
+        tms: { provider: "RoadStar neutral demo adapter", status: "demo" },
+        eld: { provider: "RoadStar simulator", status: "demo" },
+        routing: { provider: "RoadStar OSRM Ontario", status: "connected" },
+      },
+    });
+    expect(providers.find((item) => item.id === "tms")?.mode).toBe("demo");
+    expect(providers.find((item) => item.id === "eld")?.mode).toBe("demo");
+    expect(providers.find((item) => item.id === "routing")?.mode).toBe("live");
+  });
 });

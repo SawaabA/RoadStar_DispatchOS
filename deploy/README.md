@@ -67,7 +67,7 @@ Repository → Settings → Secrets and variables → Actions.
 | `DEPLOY_HOST` | Droplet IP or hostname |
 | `DEPLOY_USER` | `deploy` |
 | `DEPLOY_SSH_KEY` | Private half of the deploy keypair |
-| `DEPLOY_KNOWN_HOSTS` | Optional. Output of `ssh-keyscan <host>`. Without it the workflow trusts the host key on first use and logs a warning. |
+| `DEPLOY_KNOWN_HOSTS` | Required pinned host-key line for the production host. |
 
 The workflow refuses to run rather than producing a broken release when these are missing: the web
 image build fails if the two `VITE_` values are absent, and the release job fails before touching the
@@ -79,12 +79,15 @@ push access cannot set them, from the web UI or `gh secret set`.
 Never store a Supabase `service_role` or secret key here. The two `VITE_` values are the only
 credentials the browser build needs, and row-level security is what protects the data.
 
+Verify the SSH fingerprint independently before saving `DEPLOY_KNOWN_HOSTS`: read the ED25519 fingerprint from the hosting provider's recovery console with `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`, then compare it with `ssh-keyscan -t ed25519 <host> | ssh-keygen -lf -`. Only after they match, save the complete `ssh-keyscan -H -t ed25519 <host>` output as the GitHub secret. The deployment now fails closed when this secret is absent.
+
 **Variables** (optional, these have defaults)
 
 | Name | Default |
 |---|---|
 | `DEPLOY_PATH` | `/opt/roadstar` |
 | `APP_ORIGIN` | `https://roadstardispatch.xyz` |
+| `REQUIRE_REAL_ROUTING` | `false`; set to `true` after the Ontario graph is provisioned so post-deploy verification rejects presentation fallback |
 
 The workflow uses a `production` environment, so you can add a required reviewer there if you want a
 manual gate before anything reaches the droplet.
@@ -133,6 +136,37 @@ export IMAGE_PREFIX=ghcr.io/sawaaba/roadstar_dispatchos IMAGE_TAG=latest
 docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml up -d
 ```
+
+## Ontario routing lifecycle
+
+Run the **Provision Ontario OSRM** workflow manually and type `PROVISION-ONTARIO`. The guarded provisioner verifies at least 20 GB free disk and 8 GB combined RAM/swap, downloads the current Geofabrik Ontario extract, verifies its MD5, runs the official MLD extract/partition/customize pipeline, and enables the internal-only `osrm` service. It aborts before downloading when the host does not meet those checks. Once successful, set the GitHub `REQUIRE_REAL_ROUTING` variable to `true`.
+
+Refresh the graph monthly when route freshness matters, or at least quarterly for a demonstration environment, by running the same workflow. The download is replaced only after checksum verification; the marker makes subsequent application deployments enable the OSRM override automatically. Re-run `npm run verify:deployment` after every refresh.
+
+OSRM has no published host port. Only the integration gateway reaches `http://osrm:5000` through the Compose network. Gateway and web readiness fail when `REQUIRE_ROUTING=true` and the engine cannot answer its nearest-road probe.
+
+## Lightweight host monitoring
+
+The deployment copies `monitor-roadstar.sh` to `/opt/roadstar`. Run it every five minutes from a systemd timer or monitoring agent:
+
+```bash
+chmod 700 /opt/roadstar/monitor-roadstar.sh
+ROADSTAR_ORIGIN=https://roadstardispatch.xyz /opt/roadstar/monitor-roadstar.sh /opt/roadstar
+```
+
+It emits one JSON record containing container health/restarts, 15-minute error count, disk use, memory use, and `/readyz` status, and exits non-zero at actionable thresholds. Route its output and failures to the host's journal/alerting destination; it is a probe, not a substitute for an external uptime monitor.
+
+Install the included systemd timer once from an administrator shell:
+
+```bash
+cp /opt/roadstar/roadstar-monitor.service /etc/systemd/system/
+cp /opt/roadstar/roadstar-monitor.timer /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now roadstar-monitor.timer
+systemctl list-timers roadstar-monitor.timer
+```
+
+The service runs as the `deploy` user and writes its JSON result to the journal. Inspect the latest run with `journalctl -u roadstar-monitor.service -n 20`. Connect failed units or non-zero probe output to the host's alerting provider before treating this as production operations coverage.
 
 ## Rollback
 

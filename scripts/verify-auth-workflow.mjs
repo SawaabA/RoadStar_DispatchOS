@@ -14,6 +14,7 @@ let failures = 0;
 const sessions = {};
 let originalSnapshot;
 let organizationA;
+let qaPlanExternalId;
 
 function pass(label, detail = "") {
   console.log(`[PASS] ${label}${detail ? ` - ${detail}` : ""}`);
@@ -129,13 +130,54 @@ async function waitForSubscription(channel) {
   });
 }
 
+async function verifyLoadingPlanWorkflow() {
+  qaPlanExternalId = `ROADSTAR-QA-${Date.now()}`;
+  const values = {
+    p_organization_id: organizationA,
+    p_external_id: qaPlanExternalId,
+    p_name: "RoadStar automated QA plan",
+    p_objective: "unload",
+    p_manifest: [],
+    p_plan: { items: [], unplanned: [], totalWeight: 0, usedFloorArea: 0, warnings: [], engine: "qa" },
+  };
+  for (let expectedVersion = 1; expectedVersion <= 2; expectedVersion += 1) {
+    const saved = await sessions.dispatcherA.client.rpc("save_loading_plan", values);
+    if (saved.error) throw saved.error;
+    const result = Array.isArray(saved.data) ? saved.data[0] : saved.data;
+    if (Number(result?.plan_version) !== expectedVersion) throw new Error(`Loading plan returned version ${result?.plan_version}; expected ${expectedVersion}`);
+  }
+
+  const visible = await sessions.viewerA.client.from("loading_plans").select("id,version,status").eq("external_id", qaPlanExternalId).order("version");
+  if (visible.error) throw visible.error;
+  if (visible.data.length !== 2) throw new Error(`Viewer saw ${visible.data.length} QA plan versions; expected two`);
+  pass("loading plan versions visible to organization viewer", "versions 1 and 2");
+
+  const viewerApproval = await sessions.viewerA.client.rpc("approve_loading_plan", { p_plan_id: visible.data[0].id });
+  if (!viewerApproval.error) throw new Error("Viewer unexpectedly approved a loading plan");
+  pass("viewer loading-plan approval denied", viewerApproval.error.code || "write denied");
+
+  for (const plan of visible.data) {
+    const approval = await sessions.dispatcherA.client.rpc("approve_loading_plan", { p_plan_id: plan.id });
+    if (approval.error) throw approval.error;
+  }
+  const final = await sessions.dispatcherA.client.from("loading_plans").select("version,status").eq("external_id", qaPlanExternalId).order("version");
+  if (final.error) throw final.error;
+  if (final.data[0]?.status !== "superseded" || final.data[1]?.status !== "approved") throw new Error(`Loading plan approval states were ${JSON.stringify(final.data)}`);
+  pass("loading plan approval supersedes prior version", "version 2 approved");
+
+  const foreign = await sessions.dispatcherB.client.from("loading_plans").select("id").eq("external_id", qaPlanExternalId);
+  if (foreign.error) throw foreign.error;
+  if (foreign.data.length) throw new Error("Organization B saw Organization A loading plans");
+  pass("loading plan tenant isolation", "Organization B returned no rows");
+}
+
 async function run() {
   requireEnvironment();
   await Promise.all(Object.entries(profiles).map(([name, credentials]) => signIn(name, credentials)));
   pass("five independent accounts authenticated");
   // Hosted Auth and PostgREST nodes can differ by a few seconds. Let freshly
   // issued JWTs age before sending five parallel authenticated API sessions.
-  await new Promise((resolve) => setTimeout(resolve, 5_000));
+  await new Promise((resolve) => setTimeout(resolve, 10_000));
 
   const memberships = Object.fromEntries(await Promise.all(
     Object.keys(profiles).map(async (name) => [name, await membership(name)]),
@@ -150,6 +192,8 @@ async function run() {
     throw new Error("QA users are not split across the expected two organizations");
   }
   pass("roles and organization fixtures", `Organization A ${organizationA}; Organization B ${organizationB}`);
+
+  await verifyLoadingPlanWorkflow();
 
   originalSnapshot = await snapshot(sessions.dispatcherA.client, organizationA);
   const assignments = Array.isArray(originalSnapshot.state?.assignments) ? originalSnapshot.state.assignments : [];
@@ -180,7 +224,7 @@ async function run() {
 
   const event = await Promise.race([
     realtimePromise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error("Viewer did not receive the snapshot update within 10 seconds")), 10_000)),
+    new Promise((_, reject) => setTimeout(() => reject(new Error("Viewer did not receive the snapshot update within 30 seconds")), 30_000)),
   ]);
   if (Number(event.new?.revision) !== Number(dispatcherSave.data)) throw new Error("Viewer received the wrong snapshot revision");
   const viewerSnapshot = await snapshot(sessions.viewerA.client, organizationA);
@@ -273,6 +317,11 @@ async function run() {
 }
 
 async function restore() {
+  if (qaPlanExternalId && sessions.dispatcherA) {
+    const cleanup = await sessions.dispatcherA.client.from("loading_plans").delete().eq("external_id", qaPlanExternalId);
+    if (cleanup.error) fail("loading plan QA cleanup", cleanup.error.message);
+    else pass("loading plan QA cleanup");
+  }
   if (!originalSnapshot || !organizationA || !sessions.dispatcherA) return;
   const current = await snapshot(sessions.dispatcherA.client, organizationA);
   const restored = await save(sessions.dispatcherA.client, organizationA, originalSnapshot.state, current.revision);

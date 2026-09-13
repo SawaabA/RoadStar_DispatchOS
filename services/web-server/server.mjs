@@ -29,7 +29,7 @@ function log(level, event, context = {}) {
 
 async function proxy(request, response) {
   const requestId = String(request.headers["x-request-id"] || randomUUID());
-  const target = request.url.startsWith("/api/traffic") || request.url.startsWith("/api/routing") || request.url.startsWith("/api/integrations")
+  const target = request.url.startsWith("/api/traffic") || request.url.startsWith("/api/routing") || request.url.startsWith("/api/integrations") || request.url.startsWith("/api/tms")
     ? targets.integrations
     : request.url.startsWith("/api/telemetry") ? targets.telemetry : targets.solver;
   const chunks = [];

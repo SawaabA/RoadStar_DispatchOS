@@ -9,7 +9,7 @@ import type {
   TruckAsset,
 } from "../../dispatch/types";
 import type { RoadIncident } from "../../intelligence/types";
-import { fetchRoadRoute } from "../lib/routingProvider";
+import { fetchRoadRoute, type RoadRoute } from "../lib/routingProvider";
 
 type Props = {
   trucks: TruckAsset[];
@@ -53,7 +53,7 @@ export function FleetMap({
   const container = useRef<HTMLDivElement>(null),
     map = useRef<MapInstance | null>(null),
     markers = useRef<maplibregl.Marker[]>([]);
-  const [roadRoutes, setRoadRoutes] = useState<Record<string, Array<[number, number]>>>({});
+  const [roadRoutes, setRoadRoutes] = useState<Record<string, RoadRoute>>({});
   const routeRequests = useMemo(() => assignments.flatMap((assignment) => {
     const load = loads.find((item) => item.id === assignment.loadId);
     return load ? [{ id: assignment.id, origin: load.originPoint, destination: load.destinationPoint }] : [];
@@ -65,7 +65,7 @@ export function FleetMap({
       route: await fetchRoadRoute(request.origin, request.destination, controller.signal),
     }))).then((results) => {
       if (controller.signal.aborted) return;
-      setRoadRoutes(Object.fromEntries(results.filter((item) => item.route).map((item) => [item.id, item.route!.coordinates])));
+      setRoadRoutes(Object.fromEntries(results.filter((item) => item.route).map((item) => [item.id, item.route!])));
     });
     return () => controller.abort();
   }, [routeRequests]);
@@ -140,7 +140,7 @@ export function FleetMap({
         properties: { id: a.id },
         geometry: {
           type: "LineString" as const,
-          coordinates: roadRoute ?? [
+          coordinates: roadRoute?.coordinates ?? [
             ...(a.breadcrumbs || [load.originPoint]).map((position) => [position.lng, position.lat] as [number, number]),
             [a.currentPoint.lng, a.currentPoint.lat] as [number, number],
             [load.destinationPoint.lng, load.destinationPoint.lat] as [number, number],
@@ -186,8 +186,10 @@ export function FleetMap({
     roadRoutes,
   ]);
   const routedCount = Object.keys(roadRoutes).length;
-  return <div className="fleet-map-shell" role="region" aria-label={`Fleet map with ${trucks.length} trucks, ${incidents.length} incidents, and ${routedCount} provider-routed movements. ${assignments.length - routedCount} movements use presentation geometry.`}>
+  const routedDistance = Math.round(Object.values(roadRoutes).reduce((sum, route) => sum + route.distanceKm, 0));
+  const routedMinutes = Math.round(Object.values(roadRoutes).reduce((sum, route) => sum + route.durationMinutes, 0));
+  return <div className="fleet-map-shell" role="region" aria-label={`Fleet map with ${trucks.length} trucks, ${incidents.length} incidents, and ${routedCount} provider-routed movements covering ${routedDistance} kilometres in approximately ${routedMinutes} minutes. ${assignments.length - routedCount} movements use presentation geometry.`}>
     <div className="fleet-map" ref={container} />
-    <span className={`route-mode ${routedCount ? "live" : "fallback"}`}>{routedCount ? "ROAD-ROUTED" : "PRESENTATION ROUTE"}</span>
+    <span className={`route-mode ${routedCount ? "live" : "fallback"}`}>{routedCount ? `ROAD-ROUTED · ${routedDistance} km · ${routedMinutes} min` : "PRESENTATION ROUTE"}</span>
   </div>;
 }

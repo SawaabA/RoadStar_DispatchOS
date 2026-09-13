@@ -28,7 +28,7 @@ export function isDispatchState(value: unknown): value is DispatchState {
   const validDecisions = !candidate.decisionLog || (
     Array.isArray(candidate.decisionLog) && candidate.decisionLog.every((item) =>
       item && typeof item.id === "string" && typeof item.summary === "string" &&
-      ["plan", "replan", "exception", "backhaul", "driver"].includes(item.kind) &&
+      ["plan", "replan", "exception", "backhaul", "driver", "load"].includes(item.kind) &&
       ["accepted", "rejected", "acknowledged", "started", "declined"].includes(item.outcome) &&
       Number.isFinite(Date.parse(item.createdAt)),
     )
@@ -36,7 +36,20 @@ export function isDispatchState(value: unknown): value is DispatchState {
 
   return (
     validWeights && validAcknowledgements && validDecisions &&
-    candidate.loads.every((item) => item && typeof item.id === "string") &&
+    candidate.loads.every((item) => item && typeof item.id === "string" && (
+      !item.cargoItems || (Array.isArray(item.cargoItems) && item.cargoItems.every((cargo) =>
+        cargo && typeof cargo.id === "string" && typeof cargo.label === "string" &&
+        Number.isInteger(cargo.quantity) && cargo.quantity > 0 &&
+        [cargo.lengthIn, cargo.widthIn, cargo.heightIn, cargo.unitWeightLbs].every((value) => Number.isFinite(value) && value > 0) &&
+        (cargo.clearanceIn === undefined || Number.isFinite(cargo.clearanceIn) && cargo.clearanceIn >= 0) &&
+        (cargo.maxStackWeightLbs === undefined || Number.isFinite(cargo.maxStackWeightLbs) && cargo.maxStackWeightLbs >= 0) &&
+        (cargo.floorBearingPsf === undefined || Number.isFinite(cargo.floorBearingPsf) && cargo.floorBearingPsf > 0),
+      ))
+    ) && (!item.additionalStops || Array.isArray(item.additionalStops) && item.additionalStops.every((stop) =>
+      stop && typeof stop.id === "string" && typeof stop.location === "string" &&
+      Number.isFinite(stop.point?.lat) && Number.isFinite(stop.point?.lng) &&
+      Number.isFinite(Date.parse(stop.appointmentStart)) && Number.isFinite(Date.parse(stop.appointmentEnd)),
+    ))) &&
     candidate.drivers.every(
       (item) =>
         item &&
