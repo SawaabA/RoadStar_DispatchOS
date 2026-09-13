@@ -91,6 +91,7 @@ export function useDispatchOperations() {
     const client = supabase;
     let active = true;
     let channel: ReturnType<typeof client.channel> | null = null;
+    let reconciliationTimer: number | null = null;
     setSyncStatus("connecting");
     const connect = async () => {
       const { data: membership, error: membershipError } = await client
@@ -161,6 +162,26 @@ export function useDispatchOperations() {
       }
       if (!active) return;
       syncReady.current = true;
+      const applyRemoteSnapshot = (row: {
+        organization_id?: number;
+        state?: DispatchState;
+        revision?: number;
+      }) => {
+        if (!isDispatchState(row.state) || !active || Number(row.organization_id) !== orgId) return;
+        const remoteRevision = Number(row.revision ?? 0);
+        if (remoteRevision <= snapshotRevision.current) return;
+        const serialized = JSON.stringify(row.state);
+        const localSerialized = JSON.stringify(stateRef.current);
+        const hasUnsavedLocalEdit = lastSyncedState.current !== null && localSerialized !== lastSyncedState.current;
+        if (hasUnsavedLocalEdit && serialized !== localSerialized) {
+          setSyncStatus("conflict");
+          return;
+        }
+        lastSyncedState.current = serialized;
+        snapshotRevision.current = remoteRevision;
+        if (serialized !== localSerialized) setState(row.state);
+        setSyncStatus("synced");
+      };
       channel = client
         .channel(`roadstar-dispatch-state-${orgId}`)
         .on(
@@ -171,41 +192,34 @@ export function useDispatchOperations() {
             table: "dispatch_snapshots",
             filter: `organization_id=eq.${orgId}`,
           },
-          (payload) => {
-            const row = payload.new as {
-              organization_id?: number;
-              state?: DispatchState;
-              revision?: number;
-            };
-            if (
-              !isDispatchState(row.state) ||
-              !active ||
-              Number(row.organization_id) !== orgId
-            )
-              return;
-            const serialized = JSON.stringify(row.state);
-            const localSerialized = JSON.stringify(stateRef.current);
-            const hasUnsavedLocalEdit = lastSyncedState.current !== null && localSerialized !== lastSyncedState.current;
-            if (hasUnsavedLocalEdit && serialized !== localSerialized) {
-              setSyncStatus("conflict");
-              return;
-            }
-            lastSyncedState.current = serialized;
-            snapshotRevision.current = Number(row.revision ?? snapshotRevision.current);
-            if (serialized !== localSerialized)
-              setState(row.state);
-          },
+          (payload) => applyRemoteSnapshot(payload.new as Parameters<typeof applyRemoteSnapshot>[0]),
         )
         .subscribe((status) => {
           if (status === "SUBSCRIBED") setSyncStatus("synced");
           if (status === "CHANNEL_ERROR" || status === "TIMED_OUT")
             setSyncStatus("error");
         });
+      // Realtime is the fast path, but websocket delivery is not guaranteed.
+      // Revision polling repairs a missed event without overwriting local edits.
+      reconciliationTimer = window.setInterval(async () => {
+        const { data: remote, error: reconciliationError } = await client
+          .from("dispatch_snapshots")
+          .select("organization_id, state, revision")
+          .eq("organization_id", orgId)
+          .maybeSingle();
+        if (!active) return;
+        if (reconciliationError) {
+          setSyncStatus("error");
+          return;
+        }
+        if (remote) applyRemoteSnapshot(remote as Parameters<typeof applyRemoteSnapshot>[0]);
+      }, 15_000);
     };
     void connect();
     return () => {
       active = false;
       syncReady.current = false;
+      if (reconciliationTimer !== null) window.clearInterval(reconciliationTimer);
       if (channel) void client.removeChannel(channel);
     };
   }, [userEmail]);

@@ -92,7 +92,7 @@ if (!supabaseUrl || !supabaseKey) {
     if (actual !== expectedSchema) throw new Error(`expected ${expectedSchema}, received ${actual || "none"}`);
     return actual;
   });
-  for (const table of ["dispatch_snapshots", "decision_records", "driver_user_links"]) {
+  for (const table of ["dispatch_snapshots", "decision_records", "driver_user_links", "loading_plans", "load_documents"]) {
     await check(`anonymous access denied: ${table}`, async () => {
       const response = await fetch(`${supabaseUrl}/rest/v1/${table}?select=*&limit=0`, { headers, signal: AbortSignal.timeout(10_000) });
       if (response.status !== 401 && response.status !== 403) throw new Error(`expected 401/403, received ${response.status}`);

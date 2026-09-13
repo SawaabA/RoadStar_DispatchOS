@@ -86,7 +86,7 @@ test("3D planner validates numeric shipment input", async ({ page }) => {
 
 test("dispatcher creates a mixed-cargo load and imports it into the 3D planner", async ({ page }) => {
   await page.getByRole("button", { name: /^Load board/ }).click();
-  await page.getByRole("button", { name: "New load" }).click();
+  await page.getByRole("button", { name: "Advanced cargo load" }).click();
   const dialog = page.getByRole("dialog", { name: "Create a dispatch-ready load" });
   await dialog.getByLabel("CUSTOMER").fill("QA Components");
   await dialog.getByLabel("DESCRIPTION").fill("Mixed cargo acceptance journey");
@@ -107,7 +107,7 @@ test("dispatcher creates a mixed-cargo load and imports it into the 3D planner",
 
 test("dispatcher can edit, duplicate, cancel, archive, and restore a load", async ({ page }) => {
   await page.getByRole("button", { name: /^Load board/ }).click();
-  await page.getByRole("button", { name: "New load" }).click();
+  await page.getByRole("button", { name: "Advanced cargo load" }).click();
   let dialog = page.getByRole("dialog", { name: "Create a dispatch-ready load" });
   const originalBill = await dialog.getByLabel("LOAD NUMBER").inputValue();
   await dialog.getByLabel("CUSTOMER").fill("Lifecycle QA");

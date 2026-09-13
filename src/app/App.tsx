@@ -756,8 +756,8 @@ function LoadsPage({ ops, documents }: { ops: ReturnType<typeof useDispatchOpera
           </p>
         </div>
         <div className="page-heading-actions">
-          <button className="btn secondary" disabled={!ops.canManageDispatch} title={ops.canManageDispatch ? "Create a load from an uploaded rate confirmation" : "Your role has read-only access"} onClick={() => { setImported(null); setIntakeMessage(null); setCreatingLoad(true); }}>Import document</button>
-          <button className="btn primary" disabled={!ops.canManageDispatch} title={ops.canManageDispatch ? "Create a dispatch-ready load with detailed cargo" : "Your role has read-only access"} onClick={() => setCreating(true)}>+ New load</button>
+          <button className="btn secondary" disabled={!ops.canManageDispatch} title={ops.canManageDispatch ? "Create a multi-stop load with detailed, irregular cargo" : "Your role has read-only access"} onClick={() => setCreating(true)}>Advanced cargo load</button>
+          <button className="btn primary" disabled={!ops.canManageDispatch} title={ops.canManageDispatch ? "Create a load manually or from an uploaded rate confirmation" : "Your role has read-only access"} onClick={() => { setImported(null); setIntakeMessage(null); setCreatingLoad(true); }}>+ New load</button>
         </div>
       </div>
       {created && <p className="action-success" role="status">{created} was created and is ready for dispatch.</p>}
