@@ -245,6 +245,7 @@ Models resold through OpenRouter (`spur-gpt-5-5`, `spur-claude-*`, `spur-gemini-
 
 - **Migrations are manual.** The deploy pipeline does not run them. Apply new SQL in the Supabase SQL editor **before** merging code that depends on it, then confirm `system_health.schema_version`. The anon role gets `permission denied` (not "not found") for `load_documents` once the migration is applied.
 - **Health.** `GET /api/ai/health` returns `status`: `not_configured` (no key), `degraded` (auth not configured, a non-sovereign model configured, or the last call failed), `configured` (no call yet) or `connected`. `/api/integrations/health` lists the AI provider next to the others.
+- **Static asset types.** The web gateway sends `nosniff`, so every script type must be in its MIME map. The first P2 release served the pdf.js worker (`pdf.worker.min-*.mjs`) as `application/octet-stream`, which breaks PDF import in production while working under Vite. `.mjs` is now mapped, and the quality gate step `scripts/check-served-assets.mjs` serves `dist/` through the production gateway and fails on any script or stylesheet with a non-executable type.
 - **Logs.** Search the gateway logs for `ai_call`. `http_400` with `providerError: context_window_exceeded` means an image went over the budget. `timeout` means SPUR is slow and fallbacks were served.
 - **Symptoms.**
   - Copilot shows only facts: check `/api/ai/health` and `ai_call` outcomes.
@@ -265,6 +266,8 @@ Models resold through OpenRouter (`spur-gpt-5-5`, `spur-claude-*`, `spur-gemini-
 
 The gateway tests spawn the real gateway against fake SPUR and Supabase HTTP servers. New guards were **mutation-tested**: each guard was disabled in turn, and the matching test had to fail (the vision budget mutants M1–M4 are all caught).
 
+Browser journeys run against the Vite dev server, which does not reproduce production headers. The quality gate therefore also runs `scripts/check-served-assets.mjs` after the build (it caught the `.mjs` type bug when that entry was removed).
+
 Fixtures live in `tests/fixtures/`: `rate-confirmation-text.pdf` (hand-written text layer), `rate-confirmation-scan.pdf` (image only) and `rate-confirmation-photo.jpg` (98 KB, deliberately over the budget before encoding).
 
 **Live verification against SPUR (13 Sept 2026):**
@@ -282,7 +285,8 @@ services/integration-gateway/ai.mjs            shared AI plumbing (auth, roles, 
 services/integration-gateway/copilot.mjs       copilot handler and answer validation
 services/integration-gateway/extract.mjs       extraction schemas, normalization, storage download, vision budget
 services/integration-gateway/server.mjs        /api/ai routes and health
-services/web-server/server.mjs                 /api/ai proxy: Authorization forwarding, 45 s timeout
+services/web-server/server.mjs                 /api/ai proxy: Authorization forwarding, 45 s timeout; .mjs MIME type
+scripts/check-served-assets.mjs                release check: built scripts served with executable types
 src/shared/lib/aiClient.ts                     postAi with the Supabase session token; AiRequestError
 src/features/intelligence/lib/copilotContext.ts   deterministic copilot facts
 src/features/intelligence/components/CopilotPanel.tsx
