@@ -1,0 +1,85 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
+        VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY}
+    environment:
+      SOLVER_URL: http://solver:7070
+      SIMULATOR_URL: ${TELEMATICS_URL:-http://simulator:7071}
+      INTEGRATION_URL: http://integrations:7072
+    ports:
+      - "8080:8080"
+    depends_on:
+      solver:
+        condition: service_healthy
+      simulator:
+        condition: service_healthy
+      integrations:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+  solver:
+    build:
+      context: .
+      dockerfile: Dockerfile.solver
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:7070/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+  simulator:
+    build:
+      context: .
+      dockerfile: Dockerfile.simulator
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:7071/api/telemetry/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+  integrations:
+    build:
+      context: .
+      dockerfile: Dockerfile.integrations
+    environment:
+      APP_ORIGIN: ${APP_ORIGIN:-http://localhost:8080}
+      ROUTING_PROVIDER: ${ROUTING_PROVIDER:-OSRM}
+      ROUTING_BASE_URL: ${ROUTING_BASE_URL:-}
+      ROUTING_API_TOKEN: ${ROUTING_API_TOKEN:-}
+      REQUIRE_ROUTING: ${REQUIRE_ROUTING:-false}
+      TMS_PROVIDER: ${TMS_PROVIDER:-}
+      TMS_HEALTH_URL: ${TMS_HEALTH_URL:-}
+      TMS_API_TOKEN: ${TMS_API_TOKEN:-}
+      ELD_PROVIDER: ${ELD_PROVIDER:-}
+      ELD_HEALTH_URL: ${ELD_HEALTH_URL:-}
+      ELD_API_TOKEN: ${ELD_API_TOKEN:-}
+      SPUR_API_KEY: ${SPUR_API_KEY:-}
+      SPUR_BASE_URL: ${SPUR_BASE_URL:-https://ai.spuric.com/v1}
+      SPUR_MODEL_EXTRACT: ${SPUR_MODEL_EXTRACT:-spur-glm-5-2}
+      SPUR_MODEL_VISION: ${SPUR_MODEL_VISION:-spur-vision}
+      SPUR_MODEL_COPILOT: ${SPUR_MODEL_COPILOT:-spur-glm-5-2}
+      SPUR_MODEL_COPILOT_FALLBACK: ${SPUR_MODEL_COPILOT_FALLBACK:-spur-glm-air}
+      SPUR_TIMEOUT_MS: ${SPUR_TIMEOUT_MS:-8000}
+      AI_RATE_LIMIT_PER_MINUTE: ${AI_RATE_LIMIT_PER_MINUTE:-20}
+      SUPABASE_URL: ${SUPABASE_URL:-${VITE_SUPABASE_URL:-}}
+      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-${VITE_SUPABASE_PUBLISHABLE_KEY:-}}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:7072/readyz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped

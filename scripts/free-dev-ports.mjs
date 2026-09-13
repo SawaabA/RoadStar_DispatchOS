@@ -3,7 +3,8 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const PORTS = [5173, 7070, 7071];
+// web, solver, telemetry simulator, Ontario 511 gateway
+const PORTS = [5173, 7070, 7071, 7072];
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 const run = (command, args) => {
@@ -68,6 +69,7 @@ const commandLineOf = (pid) => {
 const isRoadStarProcess = (commandLine) =>
   commandLine.includes(repoRoot) ||
   /services[\\/]telematics-simulator/.test(commandLine) ||
+  /services[\\/]integration-gateway/.test(commandLine) ||
   /LoaderServer/.test(commandLine);
 
 let undetectable = false;

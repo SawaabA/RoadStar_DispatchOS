@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as maplibregl from "maplibre-gl";
 import type { GeoJSONSource, Map as MapInstance } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -8,6 +8,8 @@ import type {
   Facility,
   TruckAsset,
 } from "../../dispatch/types";
+import type { RoadIncident } from "../../intelligence/types";
+import { fetchRoadRoute, type RoadRoute } from "../lib/routingProvider";
 
 type Props = {
   trucks: TruckAsset[];
@@ -17,6 +19,8 @@ type Props = {
   satellite: boolean;
   selectedTruckId?: string;
   onSelectTruck?: (id: string) => void;
+  incidents?: RoadIncident[];
+  onSelectIncident?: (id: string) => void;
 };
 
 const roadStyle = "https://tiles.openfreemap.org/styles/liberty";
@@ -43,10 +47,28 @@ export function FleetMap({
   satellite,
   selectedTruckId,
   onSelectTruck,
+  incidents = [],
+  onSelectIncident,
 }: Props) {
   const container = useRef<HTMLDivElement>(null),
     map = useRef<MapInstance | null>(null),
     markers = useRef<maplibregl.Marker[]>([]);
+  const [roadRoutes, setRoadRoutes] = useState<Record<string, RoadRoute>>({});
+  const routeRequests = useMemo(() => assignments.flatMap((assignment) => {
+    const load = loads.find((item) => item.id === assignment.loadId);
+    return load ? [{ id: assignment.id, origin: load.originPoint, destination: load.destinationPoint }] : [];
+  }), [assignments.map((item) => `${item.id}:${item.loadId}`).join("|"), loads.map((item) => `${item.id}:${item.originPoint.lng}:${item.originPoint.lat}:${item.destinationPoint.lng}:${item.destinationPoint.lat}`).join("|")]);
+  useEffect(() => {
+    const controller = new AbortController();
+    void Promise.all(routeRequests.map(async (request) => ({
+      id: request.id,
+      route: await fetchRoadRoute(request.origin, request.destination, controller.signal),
+    }))).then((results) => {
+      if (controller.signal.aborted) return;
+      setRoadRoutes(Object.fromEntries(results.filter((item) => item.route).map((item) => [item.id, item.route!])));
+    });
+    return () => controller.abort();
+  }, [routeRequests]);
   useEffect(() => {
     if (!container.current) return;
     const instance = new maplibregl.Map({
@@ -99,21 +121,29 @@ export function FleetMap({
           .addTo(map.current),
       );
     }
+    for (const incident of incidents) {
+      const el = document.createElement("button");
+      el.className = `incident-marker ${incident.severity}`;
+      el.setAttribute("aria-label", `${incident.roadway} ${incident.eventType}: ${incident.description}`);
+      el.title = `${incident.roadway} · ${incident.description}`;
+      el.textContent = "!";
+      el.onclick = () => onSelectIncident?.(incident.id);
+      markers.current.push(new maplibregl.Marker({ element: el })
+        .setLngLat([incident.point.lng, incident.point.lat]).addTo(map.current));
+    }
     const features = assignments.flatMap((a) => {
       const load = loads.find((l) => l.id === a.loadId);
       if (!load) return [];
+      const roadRoute = roadRoutes[a.id];
       return [{
         type: "Feature" as const,
         properties: { id: a.id },
         geometry: {
           type: "LineString" as const,
-          coordinates: [
-            ...(a.breadcrumbs || [load.originPoint]).map((position) => [
-              position.lng,
-              position.lat,
-            ]),
-            [a.currentPoint.lng, a.currentPoint.lat],
-            [load.destinationPoint.lng, load.destinationPoint.lat],
+          coordinates: roadRoute?.coordinates ?? [
+            ...(a.breadcrumbs || [load.originPoint]).map((position) => [position.lng, position.lat] as [number, number]),
+            [a.currentPoint.lng, a.currentPoint.lat] as [number, number],
+            [load.destinationPoint.lng, load.destinationPoint.lat] as [number, number],
           ],
         },
       }];
@@ -151,6 +181,15 @@ export function FleetMap({
     selectedTruckId,
     onSelectTruck,
     satellite,
+    incidents,
+    onSelectIncident,
+    roadRoutes,
   ]);
-  return <div className="fleet-map" ref={container} />;
+  const routedCount = Object.keys(roadRoutes).length;
+  const routedDistance = Math.round(Object.values(roadRoutes).reduce((sum, route) => sum + route.distanceKm, 0));
+  const routedMinutes = Math.round(Object.values(roadRoutes).reduce((sum, route) => sum + route.durationMinutes, 0));
+  return <div className="fleet-map-shell" role="region" aria-label={`Fleet map with ${trucks.length} trucks, ${incidents.length} incidents, and ${routedCount} provider-routed movements covering ${routedDistance} kilometres in approximately ${routedMinutes} minutes. ${assignments.length - routedCount} movements use presentation geometry.`}>
+    <div className="fleet-map" ref={container} />
+    <span className={`route-mode ${routedCount ? "live" : "fallback"}`}>{routedCount ? `ROAD-ROUTED · ${routedDistance} km · ${routedMinutes} min` : "PRESENTATION ROUTE"}</span>
+  </div>;
 }

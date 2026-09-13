@@ -10,6 +10,9 @@ test.beforeEach(async ({ page }) => {
 test("all primary workspaces render without serious accessibility violations", async ({
   page,
 }) => {
+  // Eleven workspaces, each with a full axe sweep. ~18s locally but past the
+  // 30s default on a CI runner, where it failed on the last workspace.
+  test.slow();
   const runtimeErrors: string[] = [];
   page.on("pageerror", (error) => runtimeErrors.push(error.message));
   page.on("console", (message) => {
@@ -28,6 +31,9 @@ test("all primary workspaces render without serious accessibility violations", a
     ["Detention", "Detention desk"],
     ["Driver view", "Hi, Sofia"],
     ["3D load planner", "3D trailer builder"],
+    ["Intelligence", "Exceptions and automatic re-planning"],
+    ["KPI & replay", "KPI and historical replay"],
+    ["Integrations", "Integration adapters"],
   ] as const;
 
   for (const [navigation, heading] of workspaces) {
@@ -72,10 +78,63 @@ test("driver can start an accepted route", async ({ page }) => {
 
 test("3D planner validates numeric shipment input", async ({ page }) => {
   await page.getByRole("button", { name: "3D load planner", exact: true }).click();
-  const pallets = page.getByLabel("PALLETS").first();
+  const pallets = page.getByLabel("QTY").first();
   await pallets.fill("0");
-  await page.getByRole("button", { name: "Regenerate plan" }).click();
+  await page.getByRole("button", { name: "Optimize trailer" }).click();
   await expect(page.getByRole("alert")).toContainText("at least one pallet");
+});
+
+test("dispatcher creates a mixed-cargo load and imports it into the 3D planner", async ({ page }) => {
+  await page.getByRole("button", { name: /^Load board/ }).click();
+  await page.getByRole("button", { name: "Advanced cargo load" }).click();
+  const dialog = page.getByRole("dialog", { name: "Create a dispatch-ready load" });
+  await dialog.getByLabel("CUSTOMER").fill("QA Components");
+  await dialog.getByLabel("DESCRIPTION").fill("Mixed cargo acceptance journey");
+  await dialog.getByLabel("RATE (CAD)").fill("2200");
+  await dialog.getByRole("button", { name: "Continue to cargo" }).click();
+  await dialog.getByRole("button", { name: "Add cargo type" }).click();
+  await dialog.getByLabel("NAME").nth(1).fill("Forklift attachment");
+  await dialog.getByLabel("LENGTH (IN)").nth(1).fill("72");
+  await dialog.getByLabel("WIDTH (IN)").nth(1).fill("48");
+  await dialog.getByLabel("HEIGHT (IN)").nth(1).fill("36");
+  await dialog.getByLabel("UNIT LB").nth(1).fill("1800");
+  await dialog.getByRole("button", { name: "Create load" }).click();
+  await expect(page.getByText(/was created and is ready for dispatch/)).toBeVisible();
+  await page.getByRole("button", { name: "3D load planner", exact: true }).click();
+  await page.getByRole("button", { name: /Import .* active dispatch loads/ }).click();
+  await expect(page.getByText("Forklift attachment", { exact: true })).toBeVisible();
+});
+
+test("dispatcher can edit, duplicate, cancel, archive, and restore a load", async ({ page }) => {
+  await page.getByRole("button", { name: /^Load board/ }).click();
+  await page.getByRole("button", { name: "Advanced cargo load" }).click();
+  let dialog = page.getByRole("dialog", { name: "Create a dispatch-ready load" });
+  const originalBill = await dialog.getByLabel("LOAD NUMBER").inputValue();
+  await dialog.getByLabel("CUSTOMER").fill("Lifecycle QA");
+  await dialog.getByLabel("DESCRIPTION").fill("Lifecycle acceptance test");
+  await dialog.getByLabel("RATE (CAD)").fill("900");
+  await dialog.getByRole("button", { name: "Continue to cargo" }).click();
+  await dialog.getByRole("button", { name: "Create load" }).click();
+
+  const originalRow = page.getByRole("row").filter({ hasText: originalBill });
+  await originalRow.getByRole("button", { name: "Edit" }).click();
+  dialog = page.getByRole("dialog", { name: "Edit dispatch load" });
+  const revisedBill = `${originalBill}-R`;
+  await dialog.getByLabel("LOAD NUMBER").fill(revisedBill);
+  await dialog.getByRole("button", { name: "Continue to cargo" }).click();
+  await dialog.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByText(`${revisedBill} changes was created and is ready for dispatch.`)).toBeVisible();
+
+  const revisedRow = page.getByRole("row").filter({ hasText: revisedBill });
+  await revisedRow.getByRole("button", { name: "Duplicate" }).click();
+  const copyBill = `${revisedBill}-COPY`;
+  const copyRow = page.getByRole("row").filter({ hasText: copyBill });
+  await copyRow.getByRole("button", { name: "Cancel" }).click();
+  await page.getByLabel("Filter loads by status").selectOption("all");
+  await copyRow.getByRole("button", { name: "Archive" }).click();
+  await expect(copyRow).toContainText("archived");
+  await copyRow.getByRole("button", { name: "Restore" }).click();
+  await expect(copyRow).toContainText("unassigned");
 });
 
 test("global search, map style, and detention evidence controls work", async ({
@@ -95,4 +154,131 @@ test("global search, map style, and detention evidence controls work", async ({
   await page.getByRole("button", { name: /^Detention/ }).click();
   await page.getByText("View record").first().click();
   await expect(page.locator("details").first()).toHaveAttribute("open", "");
+});
+
+test("dispatcher can review and record an incident re-plan decision", async ({ page }) => {
+  await page.getByRole("button", { name: /^Intelligence/ }).click();
+  await page.getByRole("button", { name: "Inject demo closure" }).click();
+  const proposal = page.locator(".decision-card").filter({ hasText: "+35 min" }).first();
+  await expect(proposal).toContainText("+35 min");
+  await proposal.getByRole("button", { name: "Approve ETA" }).click();
+  await expect(proposal).toContainText("Decision recorded: approved");
+  await expect(page.locator(".decision-log")).toContainText("Approved 35-minute ETA re-plan");
+});
+
+test("copilot shows RoadStar's computed facts when no one is signed in", async ({ page }) => {
+  await page.getByRole("button", { name: /^Intelligence/ }).click();
+  const question = page.getByRole("button", { name: "What is our detention exposure?" });
+  await question.click();
+  await expect(question).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByText("Sign in to get a narrated answer.")).toBeVisible();
+  await expect(page.locator(".copilot-summary")).toContainText("Billable detention across");
+  await expect(page.locator(".copilot-facts li").first()).toContainText("billable min");
+
+  const results = await new AxeBuilder({ page }).include(".copilot-panel").analyze();
+  const serious = results.violations.filter((item) => ["critical", "serious"].includes(item.impact ?? ""));
+  expect(serious.map((item) => item.id)).toEqual([]);
+});
+
+test("document features ask a signed-out user to sign in instead of failing", async ({ page }) => {
+  await page.getByRole("button", { name: /^Load board/ }).click();
+  await expect(page.getByRole("heading", { name: "Load documents" })).toBeVisible();
+  await expect(page.getByText("Sign in to see proof-of-delivery photos and rate confirmations.")).toBeVisible();
+
+  await page.getByRole("button", { name: /^Driver view/ }).click();
+  await expect(page.getByText("Sign in to attach a proof of delivery.")).toBeVisible();
+});
+
+test("dispatcher creates a load that joins the load board unassigned", async ({ page }) => {
+  await page.getByRole("button", { name: /^Load board/ }).click();
+  await page.getByRole("button", { name: "+ New load" }).click();
+  const form = page.getByRole("dialog", { name: "New load" });
+  await expect(form).toBeVisible();
+
+  await form.getByRole("button", { name: "Create load" }).click();
+  await expect(form.getByText("Enter a bill number.")).toBeVisible();
+  await expect(form.getByLabel("Pickup city")).toHaveAttribute("aria-invalid", "true");
+
+  const results = await new AxeBuilder({ page }).include(".load-form-modal").analyze();
+  // Report each failing element and axe's own explanation, not just the rule name.
+  const serious = results.violations
+    .filter((item) => ["critical", "serious"].includes(item.impact ?? ""))
+    .flatMap((item) => item.nodes.map((node) => `${item.id} ${node.target.join(" ")}: ${node.any[0]?.message ?? node.failureSummary ?? ""}`));
+  expect(serious).toEqual([]);
+
+  await form.getByLabel("Bill number").fill("RS-9001");
+  await form.getByLabel("Customer").fill("Maple Freight Brokerage");
+  await form.getByLabel("Pickup city").selectOption("Guelph");
+  await form.getByLabel("Delivery city").selectOption("Hamilton");
+  await form.getByLabel("Pickup opens").fill("2026-09-14T08:00");
+  await form.getByLabel("Pickup closes").fill("2026-09-14T10:00");
+  await form.getByLabel("Deliver by").fill("2026-09-14T15:00");
+  await form.getByLabel("Equipment").selectOption("Dry Van");
+  await form.getByLabel("Weight (lb)").fill("22000");
+  await form.getByLabel("Pallets").fill("12");
+  await form.getByLabel("Rate (CAD)").fill("1450");
+  await form.getByRole("button", { name: "Create load" }).click();
+
+  await expect(form).toBeHidden();
+  const row = page.locator(".table-row").filter({ hasText: "RS-9001" });
+  await expect(row).toContainText("Guelph, ON");
+  await expect(row).toContainText("Hamilton, ON");
+});
+
+test("document reader uses a PDF's text layer, renders scans, and fits images to the vision budget", async ({ page }) => {
+  const result = await page.evaluate(async () => {
+    const { readDocumentForExtraction } = await import("/src/features/documents/lib/documentReader.ts");
+    const pdf = async (name: string) => new File([await (await fetch(`/tests/fixtures/${name}`)).arrayBuffer()], name, { type: "application/pdf" });
+    const text = await readDocumentForExtraction(await pdf("rate-confirmation-text.pdf"));
+    const scan = await readDocumentForExtraction(await pdf("rate-confirmation-scan.pdf"));
+    const photoBlob = await (await fetch("/tests/fixtures/rate-confirmation-photo.jpg")).blob();
+    const photo = await readDocumentForExtraction(new File([photoBlob], "rate-confirmation.jpg", { type: "image/jpeg" }));
+    let broken = "";
+    try { await readDocumentForExtraction(new File([new Uint8Array([1, 2, 3])], "broken.pdf", { type: "application/pdf" })); }
+    catch (error) { broken = (error as Error).message; }
+    return {
+      textMode: text.mode,
+      textContent: text.mode === "text" ? text.text : "",
+      scanMode: scan.mode,
+      scanImages: scan.mode === "images" ? scan.images.length : 0,
+      scanPayload: scan.mode === "images" ? scan.images.join("").length : 0,
+      scanPrefix: scan.mode === "images" ? scan.images[0]!.slice(0, 23) : "",
+      photoMode: photo.mode,
+      photoRawChars: Math.ceil(photoBlob.size / 3) * 4,
+      photoPayload: photo.mode === "images" ? photo.images.join("").length : 0,
+      broken,
+    };
+  });
+
+  expect(result.textMode).toBe("text");
+  expect(result.textContent).toContain("MF-88213");
+  expect(result.textContent).toContain("31,200");
+  expect(result.scanMode).toBe("images");
+  expect(result.scanImages).toBe(1);
+  expect(result.scanPrefix).toBe("data:image/jpeg;base64,");
+  // SPUR's vision tier refuses more than about 125 KB of base64 per request, so
+  // every image path must come in under the browser budget of 96,000 characters.
+  expect(result.scanPayload).toBeLessThanOrEqual(96_000);
+  expect(result.photoMode).toBe("images");
+  // The fixture is over budget as a raw upload, so this proves re-encoding happened.
+  expect(result.photoRawChars).toBeGreaterThan(96_000);
+  expect(result.photoPayload).toBeLessThanOrEqual(96_000);
+  expect(result.broken).toBe("This file is not a readable PDF.");
+});
+
+test("historical replay labels opportunity rather than guaranteed savings", async ({ page }) => {
+  await page.getByRole("button", { name: /^KPI & replay/ }).click();
+  await page.getByRole("button", { name: "Run lane-match replay" }).click();
+  await expect(page.getByText("147,760 km opportunity")).toBeVisible();
+  await expect(page.getByText(/not guaranteed savings/i).first()).toBeVisible();
+});
+
+test("irregular cargo estimates pallet displacement and reaches the 3D plan", async ({ page }) => {
+  await page.getByRole("button", { name: "3D load planner", exact: true }).click();
+  await page.getByText("Add cargo type", { exact: true }).click();
+  await expect(page.getByText(/pallet positions forgone/)).toBeVisible();
+  await page.getByRole("button", { name: "Add to manifest" }).click();
+  await expect(page.getByText("Forklift", { exact: true }).first()).toBeVisible();
+  await page.getByRole("button", { name: "Optimize trailer" }).click();
+  await expect(page.getByText(/Estimated dimensions are marked/i)).toBeVisible();
 });

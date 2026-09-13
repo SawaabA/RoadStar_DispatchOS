@@ -1,7 +1,9 @@
 import { createServer } from 'node:http'
 
 const port = Number(process.env.SIMULATOR_PORT || 7071)
+const host = process.env.SIMULATOR_HOST || '127.0.0.1'
 const clients = new Set()
+let lastEventAt = null
 
 // Events are drawn from a seeded generator so a rehearsed demo replays
 // identically. Override with SIMULATOR_SEED to get a different sequence.
@@ -105,6 +107,8 @@ const server = createServer((request, response) => {
       vehicles: vehicles.length,
       seed,
       activeEvents: vehicles.filter((vehicle) => vehicle.event).map((vehicle) => vehicle.event),
+      mode: 'demo',
+      lastEventAt,
     }))
     return
   }
@@ -167,6 +171,7 @@ setInterval(() => {
       simulatedMinutes: 2,
       event: vehicle.event,
     })
+    lastEventAt = new Date().toISOString()
     for (const client of clients) client.write(`data: ${event}\n\n`)
 
     if (vehicle.event) {
@@ -180,4 +185,4 @@ setInterval(() => {
   }
 }, 1000)
 
-server.listen(port, '127.0.0.1', () => console.log(`[SIMULATOR] telemetry stream ready on http://127.0.0.1:${port} (seed ${seed})`))
+server.listen(port, host, () => console.log(`[SIMULATOR] telemetry stream ready on http://${host}:${port} (seed ${seed})`))

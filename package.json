@@ -6,13 +6,21 @@
   "scripts": {
     "dev": "vite",
     "predev:full": "node scripts/free-dev-ports.mjs",
-    "dev:full": "concurrently --kill-others-on-fail -n SOLVER,SIM,WEB -c yellow,cyan,green \"npm:solver\" \"npm:simulator\" \"npm:dev\"",
+    "dev:full": "concurrently --kill-others-on-fail -n SOLVER,SIM,INTEGRATIONS,WEB -c yellow,cyan,magenta,green \"npm:solver\" \"npm:simulator\" \"npm:integrations\" \"npm:dev\"",
     "solver": "node services/loading-solver/run.mjs",
     "simulator": "node services/telematics-simulator/server.mjs",
+    "integrations": "node --env-file-if-exists=.env --env-file-if-exists=.env.local services/integration-gateway/server.mjs",
+    "start": "node services/web-server/server.mjs",
     "build": "tsc -b && vite build",
     "test": "vitest run",
     "test:e2e": "playwright test",
     "preview": "vite preview",
+    "quality": "node scripts/run-quality-gate.mjs",
+    "verify:deployment": "node --env-file=.env scripts/verify-deployment.mjs",
+    "verify:auth": "node --env-file=.env --env-file-if-exists=.env.qa.local scripts/verify-auth-boundaries.mjs",
+    "verify:auth:workflow": "node --env-file=.env --env-file-if-exists=.env.qa.local scripts/verify-auth-workflow.mjs",
+    "osrm:prepare": "node scripts/prepare-osrm.mjs",
+    "docker:osrm": "docker compose -f docker-compose.yml -f docker-compose.osrm.yml up --build",
     "solver:build": "node services/loading-solver/build.mjs"
   },
   "dependencies": {
@@ -24,6 +32,7 @@
     "@turf/helpers": "7.4.0",
     "lucide-react": "^0.544.0",
     "maplibre-gl": "6.9.0",
+    "pdfjs-dist": "6.3.289",
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "three": "^0.180.0"

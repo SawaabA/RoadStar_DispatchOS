@@ -1,0 +1,84 @@
+# Production stack. Unlike docker-compose.yml this builds nothing: it pulls
+# images that CI already built and pushed, so a small host never has to run
+# `npm ci` or `vite build` and cannot be killed by the OOM reaper.
+#
+# IMAGE_PREFIX and IMAGE_TAG are exported by the deploy workflow. The defaults
+# let an operator run this by hand on the host.
+
+services:
+  web:
+    image: ${IMAGE_PREFIX:-ghcr.io/sawaaba/roadstar_dispatchos}-web:${IMAGE_TAG:-latest}
+    environment:
+      SOLVER_URL: http://solver:7070
+      # Replace this with a private ELD adapter URL when a vendor is selected.
+      SIMULATOR_URL: ${TELEMATICS_URL:-http://simulator:7071}
+      INTEGRATION_URL: http://integrations:7072
+    # Bound to loopback only. Caddy terminates TLS and is the sole way in.
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      - solver
+      - simulator
+      - integrations
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  solver:
+    image: ${IMAGE_PREFIX:-ghcr.io/sawaaba/roadstar_dispatchos}-solver:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    expose:
+      - "7070"
+
+  simulator:
+    image: ${IMAGE_PREFIX:-ghcr.io/sawaaba/roadstar_dispatchos}-simulator:${IMAGE_TAG:-latest}
+    environment:
+      SIMULATOR_HOST: 0.0.0.0
+      # Pin the event sequence so a rehearsed demo replays identically.
+      SIMULATOR_SEED: ${SIMULATOR_SEED:-20260913}
+    restart: unless-stopped
+    expose:
+      - "7071"
+
+  integrations:
+    image: ${IMAGE_PREFIX:-ghcr.io/sawaaba/roadstar_dispatchos}-integrations:${IMAGE_TAG:-latest}
+    environment:
+      INTEGRATION_HOST: 0.0.0.0
+      # Must match the public origin or the browser's traffic calls are refused.
+      APP_ORIGIN: ${APP_ORIGIN:-https://roadstardispatch.xyz}
+      NODE_ENV: production
+      ROUTING_PROVIDER: ${ROUTING_PROVIDER:-OSRM-compatible routing}
+      ROUTING_BASE_URL: ${ROUTING_BASE_URL:-}
+      ROUTING_API_TOKEN: ${ROUTING_API_TOKEN:-}
+      REQUIRE_ROUTING: ${REQUIRE_ROUTING:-false}
+      TMS_PROVIDER: ${TMS_PROVIDER:-RoadStar neutral demo adapter}
+      TMS_HEALTH_URL: ${TMS_HEALTH_URL:-}
+      TMS_API_TOKEN: ${TMS_API_TOKEN:-}
+      TMS_DEMO_MODE: ${TMS_DEMO_MODE:-true}
+      ELD_PROVIDER: ${ELD_PROVIDER:-RoadStar telemetry simulator}
+      ELD_HEALTH_URL: ${ELD_HEALTH_URL:-http://simulator:7071/api/telemetry/health}
+      ELD_API_TOKEN: ${ELD_API_TOKEN:-}
+      ELD_DEMO_MODE: ${ELD_DEMO_MODE:-true}
+      SPUR_API_KEY: ${SPUR_API_KEY:-}
+      SPUR_BASE_URL: ${SPUR_BASE_URL:-https://ai.spuric.com/v1}
+      SPUR_MODEL_EXTRACT: ${SPUR_MODEL_EXTRACT:-spur-glm-5-2}
+      SPUR_MODEL_VISION: ${SPUR_MODEL_VISION:-spur-vision}
+      SPUR_MODEL_COPILOT: ${SPUR_MODEL_COPILOT:-spur-glm-5-2}
+      SPUR_MODEL_COPILOT_FALLBACK: ${SPUR_MODEL_COPILOT_FALLBACK:-spur-glm-air}
+      SPUR_TIMEOUT_MS: ${SPUR_TIMEOUT_MS:-8000}
+      AI_RATE_LIMIT_PER_MINUTE: ${AI_RATE_LIMIT_PER_MINUTE:-20}
+      SUPABASE_URL: ${SUPABASE_URL:-${VITE_SUPABASE_URL:-}}
+      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-${VITE_SUPABASE_PUBLISHABLE_KEY:-}}
+    restart: unless-stopped
+    expose:
+      - "7072"

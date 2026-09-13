@@ -1,0 +1,7 @@
+FROM node:22-alpine
+WORKDIR /app
+ENV NODE_ENV=production SIMULATOR_HOST=0.0.0.0 SIMULATOR_PORT=7071
+COPY --chown=node:node services/telematics-simulator ./services/telematics-simulator
+USER node
+EXPOSE 7071
+CMD ["node", "services/telematics-simulator/server.mjs"]

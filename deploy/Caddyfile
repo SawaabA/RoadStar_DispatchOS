@@ -1,0 +1,33 @@
+# RoadStar DispatchOS — TLS termination and reverse proxy.
+#
+# Caddy obtains and renews a Let's Encrypt certificate automatically, which
+# requires roadstardispatch.xyz to already resolve to this host's public IP.
+# Until DNS is in place, see deploy/README.md for the local-only variant.
+
+www.roadstardispatch.xyz {
+	redir https://roadstardispatch.xyz{uri} permanent
+}
+
+roadstardispatch.xyz {
+	# The telemetry stream is Server-Sent Events. It must never be compressed
+	# or buffered, or the live map stops updating while the connection is held
+	# open. Handled before the general route so `encode` cannot apply to it.
+	@telemetry path /api/telemetry/events
+	handle @telemetry {
+		reverse_proxy 127.0.0.1:8080 {
+			flush_interval -1
+		}
+	}
+
+	handle {
+		encode zstd gzip
+		reverse_proxy 127.0.0.1:8080
+	}
+
+	log {
+		output file /var/log/caddy/roadstar.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+	}
+}

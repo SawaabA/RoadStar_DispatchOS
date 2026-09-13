@@ -25,4 +25,6 @@ Events are drawn from a seeded generator, so a rehearsed demo replays identicall
 curl -X POST "http://localhost:5173/api/telemetry/inject?kind=closure&truckId=T-067"
 ```
 
-The web app records each event as a `RoadIncident` and surfaces it in the command centre's exception list. The browser fallback provider does not generate events; run this service to demonstrate them.
+Events change the vehicle's motion, so their downstream effects are real rather than cosmetic: a `dock_wait` holds the truck in place, dwell accrues, and the detention exception fires on its own. This is provider-level and complements the dispatcher's `Inject demo closure` button, which adds an informational corridor incident without moving a truck.
+
+The browser fallback provider does not generate events; run this service to demonstrate them.

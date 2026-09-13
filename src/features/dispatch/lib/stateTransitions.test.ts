@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createDemoState } from "../data/demoData";
 import { evaluateCandidate } from "./optimizer";
-import { assignCandidate, unassignLoad } from "./stateTransitions";
+import { assignCandidate, transitionDriverAssignment, unassignLoad } from "./stateTransitions";
 
 const eligibleCandidate = () => {
   const state = createDemoState();
@@ -41,5 +41,24 @@ describe("atomic dispatch transitions", () => {
 
     expect(assignCandidate(assigned, candidate)).toBe(assigned);
     expect(unassignLoad(state, "L-4509")).toBe(state);
+  });
+
+  it("allows only the assigned driver to accept, start, or decline in sequence", () => {
+    const { state, candidate } = eligibleCandidate();
+    const assigned = assignCandidate(state, candidate);
+    const assignment = assigned.assignments.find((item) => item.loadId === candidate.loadId)!;
+
+    expect(transitionDriverAssignment(assigned, assignment.id, "D-NOT-OWNER", "accepted")).toBe(assigned);
+    expect(transitionDriverAssignment(assigned, assignment.id, candidate.driverId, "in_transit")).toBe(assigned);
+
+    const accepted = transitionDriverAssignment(assigned, assignment.id, candidate.driverId, "accepted", 1_000);
+    expect(accepted.assignments.find((item) => item.id === assignment.id)?.status).toBe("accepted");
+    const started = transitionDriverAssignment(accepted, assignment.id, candidate.driverId, "in_transit", 2_000);
+    expect(started.assignments.find((item) => item.id === assignment.id)?.status).toBe("in_transit");
+    expect(started.loads.find((item) => item.id === candidate.loadId)?.status).toBe("in_transit");
+
+    const declined = transitionDriverAssignment(assigned, assignment.id, candidate.driverId, "declined", 3_000);
+    expect(declined.assignments.some((item) => item.id === assignment.id)).toBe(false);
+    expect(declined.loads.find((item) => item.id === candidate.loadId)?.status).toBe("unassigned");
   });
 });

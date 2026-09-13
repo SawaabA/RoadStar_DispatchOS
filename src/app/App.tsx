@@ -32,14 +32,26 @@ import {
   Warehouse,
   X,
 } from "lucide-react";
-import { FleetMap } from "../features/map/components/FleetMap";
 import { useDispatchOperations } from "../features/dispatch/hooks/useDispatchOperations";
+import { useRoadIntelligence } from "../features/intelligence/hooks/useRoadIntelligence";
+import { IntelligenceWorkspace } from "../features/intelligence/components/IntelligenceWorkspace";
+import { LoadDocumentsPanel } from "../features/documents/components/LoadDocumentsPanel";
+import { PodCapture } from "../features/documents/components/PodCapture";
+import { useLoadDocuments } from "../features/documents/hooks/useLoadDocuments";
+import { NewLoadForm } from "../features/dispatch/components/NewLoadForm";
+import { IntakeImporter, type ImportedDocument } from "../features/documents/components/IntakeImporter";
+import { attachIntakeDocument } from "../features/documents/lib/documents";
+import { documentExceptions } from "../features/documents/lib/documentExceptions";
+import { AnalyticsWorkspace } from "../features/intelligence/components/AnalyticsWorkspace";
+import { IntegrationsWorkspace } from "../features/intelligence/components/IntegrationsWorkspace";
+import { NewLoadModal } from "../features/dispatch/components/NewLoadModal";
 import type {
   DispatchCandidate,
   DispatchLoad,
   Driver,
 } from "../features/dispatch/types";
 import { isSupabaseConfigured } from "../shared/lib/supabase";
+import { isAuthCallbackHash } from "../shared/lib/authCallback";
 import "./styles.css";
 
 type View =
@@ -50,16 +62,19 @@ type View =
   | "map"
   | "detention"
   | "driver"
-  | "loader";
+  | "loader"
+  | "intelligence"
+  | "analytics"
+  | "integrations";
 const fmtTime = (value: string) =>
   new Intl.DateTimeFormat("en-CA", {
     hour: "numeric",
     minute: "2-digit",
   }).format(new Date(value));
-const fmtMoney = (value: number) =>
+const fmtMoney = (value: number, currency: "CAD" | "USD" = "CAD") =>
   new Intl.NumberFormat("en-CA", {
     style: "currency",
-    currency: "CAD",
+    currency,
     maximumFractionDigits: 0,
   }).format(value);
 const statusLabel = (value: string) => value.replaceAll("_", " ");
@@ -72,11 +87,19 @@ const NAV: Array<{ id: View; label: string; icon: typeof LayoutDashboard }> = [
   { id: "detention", label: "Detention", icon: Timer },
   { id: "driver", label: "Driver view", icon: Navigation },
   { id: "loader", label: "3D load planner", icon: Layers3 },
+  { id: "intelligence", label: "Intelligence", icon: AlertTriangle },
+  { id: "analytics", label: "KPI & replay", icon: Gauge },
+  { id: "integrations", label: "Integrations", icon: Settings2 },
 ];
 
 const LoaderWorkspace = lazy(() =>
   import("../features/loading/components/LoaderWorkspace").then((module) => ({
     default: module.LoaderWorkspace,
+  })),
+);
+const FleetMap = lazy(() =>
+  import("../features/map/components/FleetMap").then((module) => ({
+    default: module.FleetMap,
   })),
 );
 
@@ -106,9 +129,11 @@ const EXCEPTION_GLYPH = {
 
 function Overview({
   ops,
+  intelligence,
   onNavigate,
 }: {
   ops: ReturnType<typeof useDispatchOperations>;
+  intelligence: ReturnType<typeof useRoadIntelligence>;
   onNavigate: (v: View) => void;
 }) {
   const { state, metrics, exceptions, simulationRunning, setSimulationRunning } =
@@ -116,7 +141,9 @@ function Overview({
     active = state.assignments.filter((a) => a.status !== "completed"),
     urgent = state.loads.filter(
       (l) => l.status === "unassigned" && l.priority !== "standard",
-    );
+    ),
+    acknowledged = new Set(state.acknowledgedExceptionIds ?? []),
+    openExceptions = intelligence.exceptions.filter((item) => !acknowledged.has(item.id));
   return (
     <div className="page fade-in">
       <div className="page-heading">
@@ -212,13 +239,16 @@ function Overview({
             </button>
           </div>
           <div className="mini-map">
-            <FleetMap
-              trucks={state.trucks}
-              assignments={state.assignments}
-              loads={state.loads}
-              facilities={state.facilities}
-              satellite={false}
-            />
+            <Suspense fallback={<div className="module-loading"><Map /><b>Loading fleet map…</b></div>}>
+              <FleetMap
+                trucks={state.trucks}
+                assignments={state.assignments}
+                loads={state.loads}
+                facilities={state.facilities}
+                satellite={false}
+                incidents={intelligence.traffic.incidents}
+              />
+            </Suspense>
           </div>
         </section>
         <section className="surface attention">
@@ -227,32 +257,14 @@ function Overview({
               <p className="kicker">ACTION REQUIRED</p>
               <h2>Exceptions</h2>
             </div>
-            <Badge tone={exceptions.length ? "amber" : "green"}>
-              {exceptions.length ? `${exceptions.length} open` : "All clear"}
-            </Badge>
+            <Badge tone="amber">{openExceptions.length} open</Badge>
           </div>
-          {exceptions.length === 0 && (
-            <p className="empty-note">
-              No equipment, HOS, pickup or detention exceptions in the current
-              plan.
-            </p>
-          )}
-          {exceptions.map((item) => (
-            <button
-              className="exception"
-              key={item.id}
-              onClick={() => onNavigate(item.view)}
-            >
-              <span className={EXCEPTION_ICON[item.severity]}>
-                {EXCEPTION_GLYPH[item.kind]}
-              </span>
-              <div>
-                <b>{item.title}</b>
-                <p>{item.detail}</p>
-              </div>
-              <ArrowRight />
-            </button>
-          ))}
+          {!openExceptions.length && <div className="empty-state">No open operational exceptions.</div>}
+          {openExceptions.slice(0, 3).map((item) => <button className="exception" key={item.id} onClick={() => onNavigate("intelligence")}>
+            <span className={item.severity === "critical" ? "danger-icon" : "amber-icon"}><AlertTriangle /></span>
+            <div><b>{item.title}</b><p>{item.detail}</p></div><ArrowRight />
+          </button>)}
+          {openExceptions.length > 3 && <button className="text-btn" onClick={() => onNavigate("intelligence")}>View all {openExceptions.length} exceptions <ArrowRight /></button>}
         </section>
       </div>
       <section className="surface">
@@ -366,6 +378,10 @@ function AssignmentModal({
                       {c.trailerId} · {Math.round(c.deadheadKm)} km deadhead
                     </p>
                     <small>{c.explanation}</small>
+                    <details className="score-details">
+                      <summary>Why this score?</summary>
+                      <div><span>Deadhead <b>{Math.round(c.scoreBreakdown.deadhead)}</b></span><span>On-time <b>{Math.round(c.scoreBreakdown.onTime)}</b></span><span>HOS buffer <b>{Math.round(c.scoreBreakdown.hosBuffer)}</b></span><span>Future position <b>{Math.round(c.scoreBreakdown.futurePosition)}</b></span></div>
+                    </details>
                   </div>
                   <div className="candidate-score">
                     <strong>{c.score}</strong>
@@ -728,13 +744,21 @@ function DispatchBoard({
   );
 }
 
-function LoadsPage({ ops }: { ops: ReturnType<typeof useDispatchOperations> }) {
+function LoadsPage({ ops, documents }: { ops: ReturnType<typeof useDispatchOperations>; documents: ReturnType<typeof useLoadDocuments> }) {
+  const [creatingLoad, setCreatingLoad] = useState(false);
+  const [imported, setImported] = useState<ImportedDocument | null>(null);
+  const [intakeMessage, setIntakeMessage] = useState<string | null>(null);
   const [query, setQuery] = useState(""),
-    rows = ops.state.loads.filter((l) =>
-      `${l.billNumber}${l.customer}${l.origin}${l.destination}`
-        .toLowerCase()
-        .includes(query.toLowerCase()),
-    );
+    [creating, setCreating] = useState(false),
+    [editing, setEditing] = useState<DispatchLoad | null>(null),
+    [created, setCreated] = useState(""),
+    [statusFilter, setStatusFilter] = useState("active"),
+    [sort, setSort] = useState("pickup"),
+    rows = ops.state.loads.filter((load) => {
+      const matchesQuery = `${load.billNumber}${load.customer}${load.origin}${load.destination}`.toLowerCase().includes(query.toLowerCase());
+      const matchesStatus = statusFilter === "all" || statusFilter === "active" && !["completed", "cancelled", "archived"].includes(load.status) || load.status === statusFilter;
+      return matchesQuery && matchesStatus;
+    }).sort((left, right) => sort === "value" ? right.rate - left.rate : sort === "weight" ? right.weightLbs - left.weightLbs : Date.parse(left.pickupStart) - Date.parse(right.pickupStart));
   return (
     <div className="page fade-in">
       <div className="page-heading">
@@ -746,8 +770,34 @@ function LoadsPage({ ops }: { ops: ReturnType<typeof useDispatchOperations> }) {
             view.
           </p>
         </div>
-        <button className="btn primary" disabled title="Load creation is planned for the next phase">+ New load</button>
+        <div className="page-heading-actions">
+          <button className="btn secondary" disabled={!ops.canManageDispatch} title={ops.canManageDispatch ? "Create a multi-stop load with detailed, irregular cargo" : "Your role has read-only access"} onClick={() => setCreating(true)}>Advanced cargo load</button>
+          <button className="btn primary" disabled={!ops.canManageDispatch} title={ops.canManageDispatch ? "Create a load manually or from an uploaded rate confirmation" : "Your role has read-only access"} onClick={() => { setImported(null); setIntakeMessage(null); setCreatingLoad(true); }}>+ New load</button>
+        </div>
       </div>
+      {created && <p className="action-success" role="status">{created} was created and is ready for dispatch.</p>}
+      {creatingLoad && <NewLoadForm
+        onCreate={(draft) => {
+          const result = ops.createLoadFromDraft(draft);
+          // The load exists first; attaching its source document is best effort
+          // and reported, never a reason to undo the load.
+          if (result.ok && imported && ops.userEmail && ops.organizationId !== null) {
+            void attachIntakeDocument(ops.organizationId, result.loadId, imported.file)
+              .then(() => setIntakeMessage(`${draft.billNumber} created with its source document attached.`))
+              .catch((error: Error) => setIntakeMessage(`${draft.billNumber} was created, but its source document could not be attached: ${error.message}`));
+          }
+          return result;
+        }}
+        onClose={() => { setCreatingLoad(false); setImported(null); }}
+        initial={imported?.draft}
+        evidence={imported?.evidence}
+        importer={<IntakeImporter signedIn={Boolean(ops.userEmail)} onImported={setImported} />}
+        notice={imported && (imported.warnings.length > 0 || imported.notes.length > 0)
+          ? <ul className="intake-notes" aria-label="Import notes">{[...imported.warnings, ...imported.notes].map((note) => <li key={note}>{note}</li>)}</ul>
+          : null}
+      />}
+      {intakeMessage && <p className="intake-banner" role="status">{intakeMessage}</p>}
+      <LoadDocumentsPanel documents={documents.documents} loads={ops.state.loads} signedIn={Boolean(ops.userEmail)} error={documents.error} />
       <section className="surface table-surface">
         <div className="table-toolbar">
           <div className="search">
@@ -759,47 +809,45 @@ function LoadsPage({ ops }: { ops: ReturnType<typeof useDispatchOperations> }) {
               placeholder="Search bill, customer, or city"
             />
           </div>
-          <button className="btn secondary" disabled title="Advanced filters are planned for the next phase">
-            <ListFilter />
-            Filters
-          </button>
+          <div className="load-filters"><ListFilter /><select aria-label="Filter loads by status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="active">Active</option><option value="all">All statuses</option><option value="unassigned">Unassigned</option><option value="assigned">Assigned</option><option value="in_transit">In transit</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option><option value="archived">Archived</option></select><select aria-label="Sort loads" value={sort} onChange={(event) => setSort(event.target.value)}><option value="pickup">Pickup time</option><option value="value">Highest value</option><option value="weight">Highest weight</option></select></div>
         </div>
-        <div className="data-table">
-          <div className="table-row table-head">
-            <span>LOAD</span>
-            <span>ROUTE</span>
-            <span>APPOINTMENT</span>
-            <span>FREIGHT</span>
-            <span>VALUE</span>
-            <span>STATUS</span>
+        <div className="data-table" role="table" aria-label="Dispatch loads">
+          <div className="table-row table-head" role="row">
+            <span role="columnheader">LOAD</span>
+            <span role="columnheader">ROUTE</span>
+            <span role="columnheader">APPOINTMENT</span>
+            <span role="columnheader">FREIGHT</span>
+            <span role="columnheader">VALUE</span>
+            <span role="columnheader">STATUS</span>
+            <span role="columnheader">ACTIONS</span>
           </div>
           {rows.map((l) => (
-            <div className="table-row" key={l.id}>
-              <span>
+            <div className="table-row" role="row" key={l.id}>
+              <span role="cell">
                 <b>{l.billNumber}</b>
                 <small>{l.customer}</small>
               </span>
-              <span>
+              <span role="cell">
                 <b>{l.origin}</b>
-                <small>→ {l.destination}</small>
+                <small>→ {l.destination}{l.additionalStops?.length ? ` · ${l.additionalStops.length} intermediate stop${l.additionalStops.length === 1 ? "" : "s"}` : ""}</small>
               </span>
-              <span>
+              <span role="cell">
                 <b>
                   {fmtTime(l.pickupStart)}–{fmtTime(l.pickupEnd)}
                 </b>
                 <small>Delivery {fmtTime(l.deliveryEnd)}</small>
               </span>
-              <span>
+              <span role="cell">
                 <b>{l.weightLbs.toLocaleString()} lb</b>
                 <small>
                   {l.pallets} pallets · {l.equipment}
                 </small>
               </span>
-              <span>
-                <b>{fmtMoney(l.rate)}</b>
-                <small>CAD</small>
+              <span role="cell">
+                <b>{fmtMoney(l.rate, l.currency)}</b>
+                <small>{l.currency ?? "CAD"}</small>
               </span>
-              <span>
+              <span role="cell">
                 <Badge
                   tone={
                     l.status === "completed"
@@ -814,11 +862,22 @@ function LoadsPage({ ops }: { ops: ReturnType<typeof useDispatchOperations> }) {
                   {statusLabel(l.status)}
                 </Badge>
               </span>
+              <span role="cell" className="load-row-actions">{ops.canManageDispatch && <><button disabled={l.status !== "unassigned"} onClick={() => setEditing(l)}>Edit</button><button onClick={() => { const duplicate = ops.duplicateLoad(l.id); if (duplicate) setCreated(duplicate.billNumber); }}>Duplicate</button>{l.status === "unassigned" && <button className="danger" onClick={() => ops.setLoadLifecycle(l.id, "cancelled")}>Cancel</button>}{["completed", "cancelled"].includes(l.status) && <button onClick={() => ops.setLoadLifecycle(l.id, "archived")}>Archive</button>}{l.status === "archived" && <button onClick={() => ops.setLoadLifecycle(l.id, "unassigned")}>Restore</button>}</>}</span>
             </div>
           ))}
           {!rows.length && <p className="empty-state">No loads match your search.</p>}
         </div>
       </section>
+      {creating && <NewLoadModal
+        existing={ops.state.loads}
+        onClose={() => setCreating(false)}
+        onCreate={(load) => {
+          const saved = ops.createLoad(load);
+          if (saved) setCreated(load.billNumber);
+          return saved;
+        }}
+      />}
+      {editing && <NewLoadModal existing={ops.state.loads} initial={editing} onClose={() => setEditing(null)} onCreate={(load) => { const saved = ops.updateLoad({ ...load, id: editing.id }); if (saved) setCreated(`${load.billNumber} changes`); return saved; }} />}
     </div>
   );
 }
@@ -917,11 +976,13 @@ function FleetPage({ ops }: { ops: ReturnType<typeof useDispatchOperations> }) {
   );
 }
 
-function MapPage({ ops }: { ops: ReturnType<typeof useDispatchOperations> }) {
+function MapPage({ ops, intelligence }: { ops: ReturnType<typeof useDispatchOperations>; intelligence: ReturnType<typeof useRoadIntelligence> }) {
   const [sat, setSat] = useState(false),
-    [truck, setTruck] = useState<string>();
+    [truck, setTruck] = useState<string>(),
+    [incidentId, setIncidentId] = useState<string>();
   const selected = ops.state.trucks.find((t) => t.id === truck),
-    active = ops.state.assignments.find((a) => a.truckId === truck);
+    active = ops.state.assignments.find((a) => a.truckId === truck),
+    incident = intelligence.traffic.incidents.find((item) => item.id === incidentId);
   return (
     <div className="map-page fade-in">
       <div className="map-toolbar">
@@ -957,15 +1018,20 @@ function MapPage({ ops }: { ops: ReturnType<typeof useDispatchOperations> }) {
         </button>
       </div>
       <div className="full-map">
-        <FleetMap
-          trucks={ops.state.trucks}
-          assignments={ops.state.assignments}
-          loads={ops.state.loads}
-          facilities={ops.state.facilities}
-          satellite={sat}
-          selectedTruckId={truck}
-          onSelectTruck={setTruck}
-        />
+        <Suspense fallback={<div className="module-loading"><Map /><b>Loading fleet map…</b></div>}>
+          <FleetMap
+            trucks={ops.state.trucks}
+            assignments={ops.state.assignments}
+            loads={ops.state.loads}
+            facilities={ops.state.facilities}
+            satellite={sat}
+            selectedTruckId={truck}
+            onSelectTruck={setTruck}
+            incidents={intelligence.traffic.incidents}
+            onSelectIncident={(id) => { setTruck(undefined); setIncidentId(id); }}
+          />
+        </Suspense>
+        {incident && <aside className="map-detail incident-detail"><button className="close" aria-label="Close incident details" onClick={() => setIncidentId(undefined)}><X /></button><p className="kicker">{incident.source === "ontario-511" ? "ONTARIO 511" : "DEMO INCIDENT"}</p><h2>{incident.roadway}</h2><Badge tone={incident.severity === "critical" || incident.severity === "high" ? "red" : "amber"}>{incident.severity}</Badge><p>{incident.description}</p><div className="map-detail-grid"><span><small>DIRECTION</small><b>{incident.direction || "Not reported"}</b></span><span><small>TYPE</small><b>{incident.eventType}</b></span></div><button className="btn primary full" onClick={() => setIncidentId(undefined)}>Return to fleet map</button></aside>}
         {selected && (
           <aside className="map-detail">
             <button className="close" aria-label="Close truck details" onClick={() => setTruck(undefined)}>
@@ -1115,17 +1181,22 @@ function DetentionPage({
 function DriverPage({
   ops,
   onNavigate,
+  documents,
 }: {
   ops: ReturnType<typeof useDispatchOperations>;
   onNavigate: (v: View) => void;
+  documents: ReturnType<typeof useLoadDocuments>["documents"];
 }) {
   const [showStopDetails, setShowStopDetails] = useState(false);
+  const [actionPending, setActionPending] = useState(false);
   const assignment =
-      ops.state.assignments.find((a) => a.driverId === "D-131") ||
-      ops.state.assignments[0],
+      (ops.driverId
+        ? ops.state.assignments.find((a) => a.driverId === ops.driverId && a.status !== "completed")
+        : ops.state.assignments.find((a) => a.driverId === "D-131")) ||
+      (ops.memberRole === "driver" ? undefined : ops.state.assignments[0]),
     load = ops.state.loads.find((l) => l.id === assignment?.loadId),
     driver = ops.state.drivers.find((d) => d.id === assignment?.driverId);
-  if (!assignment || !load || !driver) return <div className="page"><h1>Driver view</h1><p className="empty-state">There is no active driver assignment.</p></div>;
+  if (!assignment || !load || !driver) return <div className="page"><h1>Driver view</h1><p className="empty-state">{ops.actionError || "There is no active driver assignment."}</p></div>;
   const legalToDrive = driver.drivingHoursRemaining > 0 && driver.onDutyHoursRemaining > 0 && driver.cycleHoursRemaining > 0;
   return (
     <div className="driver-demo fade-in">
@@ -1190,23 +1261,29 @@ function DriverPage({
             assignment.status === "dispatched" ? (
               <button
                 className="accept"
-                onClick={() =>
-                  ops.updateAssignmentStatus(assignment.id, "accepted")
-                }
+                disabled={actionPending}
+                onClick={async () => {
+                  setActionPending(true);
+                  await ops.updateAssignmentStatus(assignment.id, "accepted");
+                  setActionPending(false);
+                }}
               >
                 <Check />
-                Accept load
+                {actionPending ? "Saving…" : "Accept load"}
               </button>
             ) : assignment.status === "accepted" ? (
               <button
                 className="accept"
-                onClick={() => {
-                  ops.updateAssignmentStatus(assignment.id, "in_transit");
-                  ops.setSimulationRunning(true);
+                disabled={actionPending}
+                onClick={async () => {
+                  setActionPending(true);
+                  const started = await ops.updateAssignmentStatus(assignment.id, "in_transit");
+                  if (started && !ops.userEmail) ops.setSimulationRunning(true);
+                  setActionPending(false);
                 }}
               >
                 <Navigation />
-                Start route
+                {actionPending ? "Starting…" : "Start route"}
               </button>
             ) : (
               <button className="accept" onClick={() => onNavigate("map")}>
@@ -1215,18 +1292,23 @@ function DriverPage({
               </button>
             )}
             <button
-              onClick={() =>
-                assignment.status === "proposed" || assignment.status === "dispatched"
-                  ? ops.unassign(load.id)
-                  : setShowStopDetails((visible) => !visible)
-              }
+              disabled={actionPending}
+              onClick={async () => {
+                if (assignment.status === "proposed" || assignment.status === "dispatched") {
+                  setActionPending(true);
+                  await ops.updateAssignmentStatus(assignment.id, "declined");
+                  setActionPending(false);
+                } else setShowStopDetails((visible) => !visible);
+              }}
               aria-expanded={assignment.status === "proposed" || assignment.status === "dispatched" ? undefined : showStopDetails}
             >
               <MapPin />
               {assignment.status === "proposed" || assignment.status === "dispatched" ? "Decline load" : "Stop details"}
             </button>
           </div>
+          {ops.actionError && <p className="driver-action-error" role="alert">{ops.actionError}</p>}
           {showStopDetails && <div className="driver-stop-details" role="status"><b>Next stop: {load.destination}</b><span>Deliver by {fmtTime(load.deliveryEnd)} · {load.description}</span></div>}
+          {(assignment.status === "accepted" || assignment.status === "in_transit") && <PodCapture loadId={load.id} organizationId={ops.organizationId} signedIn={Boolean(ops.userEmail)} documents={documents} />}
           <section className="mobile-hos">
             <div>
               <p className="kicker">HOURS OF SERVICE</p>
@@ -1383,20 +1465,36 @@ function AuthModal({
 
 export default function App() {
   const ops = useDispatchOperations(),
+    loadDocuments = useLoadDocuments(ops.organizationId),
+    documentAlerts = useMemo(() => documentExceptions(loadDocuments.documents, ops.state.loads), [loadDocuments.documents, ops.state.loads]),
+    intelligence = useRoadIntelligence(ops.state, documentAlerts),
     [view, setView] = useState<View>(() => {
       const requested = window.location.hash.slice(1) as View;
       return NAV.some((item) => item.id === requested) ? requested : "overview";
     }),
     [navOpen, setNavOpen] = useState(true),
     [authOpen, setAuthOpen] = useState(false),
+    availableNav = useMemo(
+      () => ops.memberRole === "driver"
+        ? NAV.filter((item) => item.id === "driver" || item.id === "map")
+        : NAV,
+      [ops.memberRole],
+    ),
     title = useMemo(
-      () => NAV.find((n) => n.id === view)?.label || "DispatchOS",
-      [view],
+      () => availableNav.find((n) => n.id === view)?.label || "DispatchOS",
+      [view, availableNav],
     );
   useEffect(() => {
-    window.history.replaceState(null, "", `#${view}`);
+    if (ops.memberRole === "driver" && view !== "driver" && view !== "map") setView("driver");
+  }, [ops.memberRole, view]);
+  useEffect(() => {
     document.title = `${title} · RoadStar DispatchOS`;
-  }, [view, title]);
+    // Never clobber a magic-link callback hash: auth-js reads it asynchronously
+    // and would otherwise find the session already gone. userEmail is a
+    // dependency so the route hash is restored once auth has settled.
+    if (isAuthCallbackHash(window.location.hash)) return;
+    window.history.replaceState(null, "", `#${view}`);
+  }, [view, title, ops.userEmail]);
   useEffect(() => {
     const openLoadSearch = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "k") return;
@@ -1419,7 +1517,7 @@ export default function App() {
           </b>
         </div>
         <nav>
-          {NAV.map((item) => (
+          {availableNav.map((item) => (
             <button
               key={item.id}
               className={view === item.id ? "active" : ""}
@@ -1469,18 +1567,18 @@ export default function App() {
             Operations <span>/</span> <b>{title}</b>
           </div>
           <div className="topbar-right">
-            <button className="global-search" aria-label="Search loads" onClick={() => {
+            {ops.memberRole !== "driver" && <button className="global-search" aria-label="Search loads" onClick={() => {
               setView("loads");
               window.setTimeout(() => document.querySelector<HTMLInputElement>('[aria-label="Search all loads"]')?.focus(), 0);
             }}>
               <Search />
               <span>Search anything</span>
               <kbd>Ctrl K</kbd>
-            </button>
-            <button className="alert-button" aria-label="View 3 active exceptions" onClick={() => setView("overview")}>
+            </button>}
+            {ops.memberRole !== "driver" && <button className="alert-button" aria-label={`View ${intelligence.exceptions.filter((item) => !(ops.state.acknowledgedExceptionIds ?? []).includes(item.id)).length} active exceptions`} onClick={() => setView("intelligence")}>
               <AlertTriangle />
-              <i>3</i>
-            </button>
+              <i>{intelligence.exceptions.filter((item) => !(ops.state.acknowledgedExceptionIds ?? []).includes(item.id)).length}</i>
+            </button>}
             <button className="profile" onClick={() => setAuthOpen(true)}>
               <span>
                 {ops.userEmail ? ops.userEmail.slice(0, 2).toUpperCase() : "SD"}
@@ -1488,21 +1586,28 @@ export default function App() {
               <div>
                 <b>{ops.userEmail?.split("@")[0] || "Demo Dispatcher"}</b>
                 <small>
-                  {ops.userEmail ? "Cloud synchronized" : "Local demo session"}
+                  {ops.userEmail
+                    ? `${ops.memberRole ? statusLabel(ops.memberRole) : "Member"} · Cloud synchronized`
+                    : "Local demo session"}
                 </small>
               </div>
               <ChevronDown />
             </button>
           </div>
         </header>
+        {ops.syncStatus === "conflict" && <div className="sync-conflict" role="alert"><AlertTriangle />Another dispatcher saved a newer workspace version. Your local edit was not overwritten.<button className="btn compact secondary" onClick={() => void ops.reloadCloud()}>Load latest cloud version</button></div>}
+        {ops.userEmail && ops.memberRole === "viewer" && <div className="sync-conflict" role="status"><ShieldCheck />You are signed in with read-only access. Ask an administrator for dispatcher access to make changes.</div>}
         <div className="view-container">
-          {view === "overview" && <Overview ops={ops} onNavigate={setView} />}{" "}
+          {view === "overview" && <Overview ops={ops} intelligence={intelligence} onNavigate={setView} />}{" "}
           {view === "dispatch" && <DispatchBoard ops={ops} />}{" "}
-          {view === "loads" && <LoadsPage ops={ops} />}{" "}
+          {view === "loads" && <LoadsPage ops={ops} documents={loadDocuments} />}{" "}
           {view === "fleet" && <FleetPage ops={ops} />}{" "}
-          {view === "map" && <MapPage ops={ops} />}{" "}
+          {view === "map" && <MapPage ops={ops} intelligence={intelligence} />}{" "}
           {view === "detention" && <DetentionPage ops={ops} />}{" "}
-          {view === "driver" && <DriverPage ops={ops} onNavigate={setView} />}{" "}
+          {view === "driver" && <DriverPage ops={ops} onNavigate={setView} documents={loadDocuments.documents} />}{" "}
+          {view === "intelligence" && <IntelligenceWorkspace ops={ops} intelligence={intelligence} />}{" "}
+          {view === "analytics" && <AnalyticsWorkspace ops={ops} />}{" "}
+          {view === "integrations" && <IntegrationsWorkspace ops={ops} trafficLive={intelligence.traffic.source === "ontario-511"} />}{" "}
           {view === "loader" && (
             <Suspense
               fallback={
@@ -1512,7 +1617,7 @@ export default function App() {
                 </div>
               }
             >
-              <LoaderWorkspace />
+              <LoaderWorkspace dispatchLoads={ops.state.loads} onPersistCargo={(values) => ops.saveP1Record("cargo_items", values)} onSavePlan={ops.saveLoadingPlan} onLoadPlans={ops.listLoadingPlans} onApprovePlan={ops.approveLoadingPlan} />
             </Suspense>
           )}
         </div>
