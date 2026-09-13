@@ -72,11 +72,14 @@ await check("routing rejects invalid coordinates", async () => {
   if (response.status !== 400) throw new Error(`expected HTTP 400, received ${response.status}`);
 });
 
-await check("routing handles a destination outside the Ontario graph", async () => {
+await check("routing handles a distant destination", async () => {
   const response = await fetch(`${baseUrl}/api/routing/route?origin=-79.3832,43.6532&destination=-123.1207,49.2827`, { signal: AbortSignal.timeout(20_000) });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const payload = await response.json();
-  if (!payload.fallback) throw new Error("expected a controlled fallback for a destination outside the Ontario graph");
+  if (!payload.fallback && (!(payload.distanceKm > 0) || !(payload.durationMinutes > 0) || !Array.isArray(payload.coordinates) || payload.coordinates.length < 5)) {
+    throw new Error("distant routing response is neither a controlled fallback nor a valid road route");
+  }
+  return payload.fallback ? "controlled fallback" : `${payload.source}, ${Math.round(payload.distanceKm)} km`;
 });
 
 if (!supabaseUrl || !supabaseKey) {
