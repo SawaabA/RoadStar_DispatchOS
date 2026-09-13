@@ -145,7 +145,7 @@ jobs:
           SSH_USER: ${{ secrets.DEPLOY_USER }}
           TARGET: ${{ vars.DEPLOY_PATH || '/opt/roadstar' }}
         run: |
-          scp -o StrictHostKeyChecking=yes docker-compose.prod.yml docker-compose.osrm.yml deploy/monitor-roadstar.sh deploy/roadstar-monitor.service deploy/roadstar-monitor.timer "$SSH_USER@$SSH_HOST:$TARGET/"
+          scp -o StrictHostKeyChecking=yes docker-compose.prod.yml docker-compose.osrm.yml docker-compose.hosted-routing.yml deploy/monitor-roadstar.sh deploy/roadstar-monitor.service deploy/roadstar-monitor.timer "$SSH_USER@$SSH_HOST:$TARGET/"
 
       - name: Pull and restart
         env:
@@ -167,7 +167,8 @@ jobs:
             echo 'Prepared Ontario OSRM graph found; enabling real road routing.'
             COMPOSE_FILES+=(-f docker-compose.osrm.yml)
           else
-            echo 'Ontario OSRM graph not present; deploying with presentation routing fallback.'
+            echo 'Ontario OSRM graph not present; enabling the hosted OSRM demo endpoint.'
+            COMPOSE_FILES+=(-f docker-compose.hosted-routing.yml)
           fi
           docker compose "\${COMPOSE_FILES[@]}" pull --quiet
           docker compose "\${COMPOSE_FILES[@]}" up -d --remove-orphans
