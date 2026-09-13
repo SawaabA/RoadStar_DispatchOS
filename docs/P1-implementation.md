@@ -20,7 +20,7 @@ P1 turns the P0 operating picture into an approval-first decision system. Recomm
 
 `20260911145838_roadstar_p1_intelligence_and_concurrency.sql` adds `road_incidents`, `optimization_runs`, `decision_records`, `historical_replay_runs`, `provider_connections`, and `cargo_items`. Every exposed table has RLS, explicit authenticated grants, tenant predicates and access-pattern indexes. Authenticated decisions are also normalized into `decision_records`.
 
-`save_dispatch_snapshot` is a security-invoker compare-and-swap RPC. It only updates an authorized tenant row when the expected revision matches. A stale writer receives SQLSTATE `40001`; the app preserves the edit, shows a conflict, and requires an explicit reload.
+`save_dispatch_snapshot` is a security-invoker compare-and-swap RPC. It only updates an authorized tenant row when the expected revision matches. A stale writer receives a non-retryable `P0001` application error with the revision-conflict message; the app preserves the edit, shows a conflict, and requires an explicit reload. Authorization failures use `42501` so they cannot be mistaken for concurrent edits.
 
 ## Honest boundaries
 

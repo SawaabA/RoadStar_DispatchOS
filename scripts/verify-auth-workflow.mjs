@@ -24,6 +24,17 @@ function fail(label, detail) {
   console.error(`[FAIL] ${label} - ${detail}`);
 }
 
+function errorDetail(error) {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object") {
+    const candidate = error;
+    return [candidate.code, candidate.message, candidate.details, candidate.hint]
+      .filter(Boolean)
+      .join(" | ") || JSON.stringify(candidate);
+  }
+  return String(error);
+}
+
 function requireEnvironment() {
   const missing = [];
   if (!supabaseUrl) missing.push("VITE_SUPABASE_URL");
@@ -50,6 +61,8 @@ async function signIn(name, [emailKey, passwordKey]) {
     password: process.env[passwordKey],
   });
   if (error || !data.user) throw new Error(`${name}: ${error?.message || "no user returned"}`);
+  if (!data.session?.access_token) throw new Error(`${name}: no access token returned`);
+  await client.realtime.setAuth(data.session.access_token);
   sessions[name] = { client, user: data.user };
 }
 
@@ -80,6 +93,26 @@ async function save(client, organizationId, state, expectedRevision) {
   });
 }
 
+async function waitForDriverDecisions(client, organizationId, userId, assignmentId, externalIds) {
+  const deadline = Date.now() + 10_000;
+  let outcomes = new Set();
+  do {
+    const { data, error } = await client
+      .from("decision_records")
+      .select("external_id,outcome,decided_by,context")
+      .eq("organization_id", organizationId)
+      .in("external_id", externalIds);
+    if (error) throw error;
+    const valid = (data || []).filter((item) =>
+      item.decided_by === userId && item.context?.assignment_id === assignmentId,
+    );
+    outcomes = new Set(valid.map((item) => item.outcome));
+    if (outcomes.has("accepted") && outcomes.has("started")) return outcomes;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  } while (Date.now() < deadline);
+  return outcomes;
+}
+
 async function waitForSubscription(channel) {
   await new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error("Realtime subscription timed out")), 10_000);
@@ -98,9 +131,11 @@ async function waitForSubscription(channel) {
 
 async function run() {
   requireEnvironment();
-  const workflowStartedAt = new Date().toISOString();
   await Promise.all(Object.entries(profiles).map(([name, credentials]) => signIn(name, credentials)));
   pass("five independent accounts authenticated");
+  // Hosted Auth and PostgREST nodes can differ by a few seconds. Let freshly
+  // issued JWTs age before sending five parallel authenticated API sessions.
+  await new Promise((resolve) => setTimeout(resolve, 5_000));
 
   const memberships = Object.fromEntries(await Promise.all(
     Object.keys(profiles).map(async (name) => [name, await membership(name)]),
@@ -196,15 +231,16 @@ async function run() {
   if (started.error) throw started.error;
   pass("Driver A started own assignment", ownAssignment.id);
 
-  const { data: decisions, error: decisionError } = await sessions.dispatcherA.client
-    .from("decision_records")
-    .select("outcome,decided_by,context,created_at")
-    .eq("organization_id", organizationA)
-    .eq("decided_by", sessions.driverA.user.id)
-    .gte("created_at", workflowStartedAt)
-    .contains("context", { assignment_id: ownAssignment.id });
-  if (decisionError) throw decisionError;
-  const outcomes = new Set(decisions.map((item) => item.outcome));
+  const outcomes = await waitForDriverDecisions(
+    sessions.dispatcherA.client,
+    organizationA,
+    sessions.driverA.user.id,
+    ownAssignment.id,
+    [
+      `driver:${ownAssignment.id}:${accepted.data.revision}`,
+      `driver:${ownAssignment.id}:${started.data.revision}`,
+    ],
+  );
   if (!outcomes.has("accepted") || !outcomes.has("started")) throw new Error(`Missing driver decision records; received ${[...outcomes].join(", ")}`);
   pass("driver decision records created", "accepted and started");
 
@@ -227,11 +263,11 @@ async function run() {
     save(sessions.dispatcherA2.client, organizationA, stateA2, beforeRace.revision),
   ]);
   const successes = race.filter((result) => !result.error);
-  const conflicts = race.filter((result) => result.error?.code === "40001" || /changed in another session/i.test(result.error?.message || ""));
+  const conflicts = race.filter((result) => result.error?.code === "P0001" && /changed in another session/i.test(result.error?.message || ""));
   if (successes.length !== 1 || conflicts.length !== 1) {
     throw new Error(`Expected one save and one revision conflict; received ${successes.length} save(s), ${conflicts.length} conflict(s)`);
   }
-  pass("concurrent dispatcher protection", "one save succeeded and one stale save received 40001");
+  pass("concurrent dispatcher protection", "one save succeeded and one stale save received an explicit revision conflict");
 
   await sessions.viewerA.client.removeChannel(viewerChannel);
 }
@@ -250,10 +286,13 @@ async function restore() {
 try {
   await run();
 } catch (error) {
-  fail("workflow execution", error instanceof Error ? error.message : String(error));
+  fail("workflow execution", errorDetail(error));
 } finally {
   await restore();
-  await Promise.all(Object.values(sessions).map(({ client }) => client.auth.signOut({ scope: "local" })));
+  await Promise.all(Object.values(sessions).map(async ({ client }) => {
+    client.realtime.disconnect();
+    await client.auth.signOut({ scope: "local" });
+  }));
 }
 
 if (failures) {

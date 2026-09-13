@@ -214,7 +214,7 @@ export function useDispatchOperations() {
         p_state: state,
         p_expected_revision: snapshotRevision.current,
       });
-      if (error?.code === "40001") setSyncStatus("conflict");
+      if (error?.code === "P0001" && /changed in another session/i.test(error.message)) setSyncStatus("conflict");
       else if (error) setSyncStatus("error");
       else {
         snapshotRevision.current = Number(data);

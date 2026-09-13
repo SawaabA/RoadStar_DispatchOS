@@ -88,7 +88,45 @@ join public.dispatch_snapshots snapshot on snapshot.organization_id = organizati
 cross join lateral jsonb_array_elements(snapshot.state -> 'drivers') as driver(value)
 where organization.slug = 'roadstar'
   and driver.value ->> 'id' = 'D-131'
-on conflict (external_id) do nothing;
+on conflict (organization_id, external_id) do update
+set name = excluded.name,
+    status = excluded.status,
+    duty_status = excluded.duty_status,
+    remaining_hours = excluded.remaining_hours,
+    on_duty_hours_remaining = excluded.on_duty_hours_remaining,
+    cycle_hours_remaining = excluded.cycle_hours_remaining,
+    current_location = excluded.current_location;
+
+-- A new organization does not have a dispatch snapshot until an operator opens
+-- the app for the first time. Seed only the normalized driver link dependency in
+-- that case; the app will initialize the complete demo snapshot on first login.
+insert into public.drivers (
+  organization_id,
+  external_id,
+  name,
+  status,
+  duty_status,
+  remaining_hours,
+  on_duty_hours_remaining,
+  cycle_hours_remaining,
+  current_location
+)
+select
+  organization.id,
+  'D-131',
+  'Sofia Nguyen',
+  'assigned'::public.asset_status,
+  'driving'::public.duty_status,
+  7.4,
+  8.0,
+  41.3,
+  extensions.st_setsrid(
+    extensions.st_makepoint(-80.3144, 43.3616),
+    4326
+  )::extensions.geography
+from public.organizations organization
+where organization.slug = 'roadstar'
+on conflict (organization_id, external_id) do nothing;
 
 insert into public.driver_user_links (
   organization_id, user_id, driver_external_id, created_by
@@ -113,7 +151,7 @@ begin
     join public.drivers driver on driver.organization_id = organization.id
     where organization.slug = 'roadstar' and driver.external_id = 'D-131'
   ) then
-    raise exception 'Driver D-131 is missing from both the normalized Organization A data and its dispatch snapshot.';
+    raise exception 'Unable to provision Driver D-131 in Organization A.';
   end if;
 end $$;
 
