@@ -77,6 +77,41 @@ test("driver can start an accepted route", async ({ page }) => {
   await expect(page.getByText("in transit", { exact: true })).toBeVisible();
 });
 
+test.describe("on a phone", () => {
+  test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+
+  test("driver view fits the screen with large, reachable controls", async ({ page }) => {
+    // Navigation starts as a closed drawer so the page gets the whole width.
+    const menu = page.getByRole("button", { name: "Expand navigation" });
+    await expect(menu).toBeVisible();
+    await menu.click();
+    await page.getByRole("button", { name: "Driver view", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Expand navigation" })).toBeVisible();
+
+    await expect(page.getByRole("heading", { name: /^Hi, / })).toBeVisible();
+    await expect(page.locator(".driver-notes")).toBeHidden();
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow).toBeLessThanOrEqual(0);
+
+    const primary = page.locator(".driver-actions button").first();
+    await expect(primary).toBeInViewport();
+    const box = (await primary.boundingBox())!;
+    expect(box.height).toBeGreaterThanOrEqual(44);
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(390);
+
+    const smallest = await page.locator(".phone-main").evaluate((root) => Math.min(...[...root.querySelectorAll("h1, p, b, small, button, span")]
+      .filter((element) => element.getBoundingClientRect().width > 0 && element.childElementCount === 0 && element.textContent?.trim())
+      .map((element) => parseFloat(getComputedStyle(element).fontSize))));
+    expect(smallest).toBeGreaterThanOrEqual(11);
+
+    const results = await new AxeBuilder({ page }).include(".driver-demo").analyze();
+    expect(results.violations
+      .filter((violation) => ["serious", "critical"].includes(violation.impact ?? ""))
+      .flatMap((violation) => violation.nodes.map((node) => `${violation.id}: ${node.target.join(" ")}`))).toEqual([]);
+  });
+});
+
 test("3D planner validates numeric shipment input", async ({ page }) => {
   await page.getByRole("button", { name: "3D load planner", exact: true }).click();
   const pallets = page.getByLabel("QTY").first();

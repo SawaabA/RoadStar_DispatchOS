@@ -61,3 +61,52 @@ button:focus-visible,input:focus-visible,summary:focus-visible,[tabindex]:focus-
 .intake-importer{display:grid;grid-template-columns:1fr auto;gap:6px 12px;align-items:center;border:1px dashed #b9cbc4;border-radius:9px;padding:10px 12px;margin:10px 0;background:#f7faf9}.intake-importer>div{display:flex;flex-direction:column;gap:2px}.intake-importer b{font-size:11px}.intake-importer small{font-size:10px;color:#4f625a}.intake-status{grid-column:1/-1;margin:0;font-size:10px;color:#34574a}.intake-error{color:#a82f2f}.intake-notes{margin:8px 0 0;padding:8px 10px 8px 26px;background:#fff4dd;border-radius:7px;font-size:10px;color:#6b4100;display:grid;gap:4px}.intake-banner{margin:0 0 12px;padding:10px 12px;border-radius:8px;background:#eef7f3;color:#1f4d3d;font-size:11px}
 .page-heading-actions{display:flex;align-items:center;flex-wrap:wrap;gap:.65rem}
 .auth-method{margin:0 0 4px;width:100%}.auth-method button{flex:1}.auth-field>label{display:block}.auth-password{position:relative;display:block;margin-top:6px}.auth-password input{margin-top:0;padding-right:46px}.auth-password button{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:36px;height:35px;border:0;border-radius:6px;background:transparent;color:#56655f;display:grid;place-items:center;cursor:pointer}.auth-password button:hover{background:#f0f5f3}.auth-password button:focus-visible{outline:2px solid #56b99a;outline-offset:1px}.auth-password button svg{width:16px;height:16px}.auth-hint{color:#697871;font-size:9px;margin:-2px 0 14px}.auth-modal .btn.full+.auth-message{margin-top:12px}.auth-message.error{background:#fdeeee;color:#9b2c2c}
+
+/* Driver phone frame on desktop: the content scrolls inside the frame, so the
+   proof-of-delivery section never pushes hours of service out of view. */
+.phone{display:flex;flex-direction:column}.phone>header{flex:0 0 auto}.phone-main{flex:1 1 auto;min-height:0;overflow-y:auto}
+.nav-scrim{display:none}
+
+/* Phones: navigation becomes a drawer and the driver view fills the screen. */
+@media (max-width:760px){
+  /* The dispatcher workspace sets body{min-width:1080px}; a phone must not inherit it. */
+  body{min-width:0}
+  .app-shell,.app-shell.nav-collapsed{grid-template-columns:minmax(0,1fr)}
+  .sidebar{position:fixed;top:0;bottom:0;left:0;width:min(280px,82vw);height:100vh;height:100dvh;z-index:40;padding:20px 13px;transform:translateX(-100%);transition:transform .2s ease;visibility:hidden}
+  .app-shell:not(.nav-collapsed) .sidebar{transform:none;visibility:visible;box-shadow:0 0 40px #0b1c1766}
+  .app-shell:not(.nav-collapsed) .nav-scrim{display:block;position:fixed;inset:0;z-index:35;border:0;padding:0;background:#0b1c1759}
+  .app-main{min-width:0}
+  .view-container{overflow-x:auto}
+  .topbar{height:56px;padding:0 12px;gap:10px}
+  .crumb{font-size:0}.crumb b{font-size:15px}
+  .global-search span,.global-search kbd,.profile>div,.profile>svg{display:none}
+  .topbar-right{gap:8px;min-width:0}
+  .global-search{width:44px;min-width:0;height:40px;padding:0;justify-content:center}
+  .crumb{min-width:0;overflow:hidden}.crumb b{white-space:nowrap}
+  .menu-btn{min-width:44px;min-height:44px}
+
+  .driver-demo{display:block;min-height:0;padding:0;background:none}
+  .driver-notes{display:none}
+  .phone{width:auto;height:auto;border:0;border-radius:0;box-shadow:none;background:transparent;overflow:visible}
+  .phone>header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px 4px}
+  .phone-main{padding:4px 16px 32px;overflow:visible;display:flex;flex-direction:column;gap:14px}
+  .phone .kicker{font-size:11px!important}
+  .driver-brand b{font-size:14px}.driver-brand small{font-size:10px}
+  .online{font-size:11px}
+  .driver-greeting h1{font-size:30px;margin:4px 0 0}.driver-greeting p{font-size:15px;margin:4px 0 0}
+  .mobile-load{padding:18px;border-radius:14px}
+  .mobile-load>div:first-child{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .mobile-load>div:first-child>b{font-size:15px}
+  .mobile-route{margin:16px 0}
+  .mobile-route span small{font-size:12px}.mobile-route span b{font-size:17px}
+  .mobile-meta b{font-size:16px}.mobile-meta small{font-size:12px}.mobile-meta svg{width:16px}
+  .phone .badge{font-size:11px}
+  .driver-actions{margin:0;grid-template-columns:1fr;gap:10px}
+  .driver-actions button{height:52px;font-size:16px;border-radius:10px}
+  .driver-actions svg{width:20px}
+  .driver-stop-details{margin:0;font-size:14px}
+  .driver-action-error{font-size:14px}
+  .mobile-pod p,.mobile-pod .btn{font-size:14px}.mobile-pod .btn{min-height:48px}
+  .mobile-hos{padding:16px}.mobile-hos span small{font-size:11px}.mobile-hos span b{font-size:20px}
+}
+@media (max-width:760px) and (prefers-reduced-motion:reduce){.sidebar{transition:none}}

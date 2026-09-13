@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState, useCallback } from "react";
 import { AlertTriangle, ArrowRight, Box, Check, ChevronDown, CircleDollarSign, Clock3, Database, Gauge, Layers3, LayoutDashboard, ListFilter, Map, MapPin, Menu, Navigation, PackageCheck, Play, Radio, RefreshCw, Route, Search, Settings2, ShieldCheck, Sparkles, Timer, Tractor, Truck, Users, Warehouse, X, Eye, EyeOff } from "lucide-react";
 import { useDispatchOperations } from "../features/dispatch/hooks/useDispatchOperations";
 import { useRoadIntelligence } from "../features/intelligence/hooks/useRoadIntelligence";
@@ -1472,6 +1472,11 @@ function AuthModal({
   );
 }
 
+// Below this width the navigation becomes a drawer, so a phone shows the page
+// itself rather than a sidebar that takes most of the screen.
+const NARROW_SCREEN = "(max-width: 760px)";
+const isNarrowScreen = () => typeof window !== "undefined" && window.matchMedia(NARROW_SCREEN).matches;
+
 export default function App() {
   const ops = useDispatchOperations(),
     loadDocuments = useLoadDocuments(ops.organizationId),
@@ -1481,7 +1486,7 @@ export default function App() {
       const requested = window.location.hash.slice(1) as View;
       return NAV.some((item) => item.id === requested) ? requested : "overview";
     }),
-    [navOpen, setNavOpen] = useState(true),
+    [navOpen, setNavOpen] = useState(() => !isNarrowScreen()),
     [authOpen, setAuthOpen] = useState(false),
     availableNav = useMemo(
       () => ops.memberRole === "driver"
@@ -1493,6 +1498,10 @@ export default function App() {
       () => availableNav.find((n) => n.id === view)?.label || "DispatchOS",
       [view, availableNav],
     );
+  const navigate = useCallback((next: View) => {
+    setView(next);
+    if (isNarrowScreen()) setNavOpen(false);
+  }, []);
   useEffect(() => {
     if (ops.memberRole === "driver" && view !== "driver" && view !== "map") setView("driver");
   }, [ops.memberRole, view]);
@@ -1530,7 +1539,7 @@ export default function App() {
             <button
               key={item.id}
               className={view === item.id ? "active" : ""}
-              onClick={() => setView(item.id)}
+              onClick={() => navigate(item.id)}
               title={item.label}
               aria-current={view === item.id ? "page" : undefined}
             >
@@ -1567,6 +1576,7 @@ export default function App() {
           </button>
         </div>
       </aside>
+      {navOpen && <button type="button" className="nav-scrim" aria-label="Close navigation" onClick={() => setNavOpen(false)} />}
       <main className="app-main">
         <header className="topbar">
           <button className="menu-btn" aria-label={navOpen ? "Collapse navigation" : "Expand navigation"} aria-expanded={navOpen} onClick={() => setNavOpen(!navOpen)}>
@@ -1613,7 +1623,7 @@ export default function App() {
           {view === "fleet" && <FleetPage ops={ops} />}{" "}
           {view === "map" && <MapPage ops={ops} intelligence={intelligence} />}{" "}
           {view === "detention" && <DetentionPage ops={ops} />}{" "}
-          {view === "driver" && <DriverPage ops={ops} onNavigate={setView} documents={loadDocuments.documents} />}{" "}
+          {view === "driver" && <DriverPage ops={ops} onNavigate={navigate} documents={loadDocuments.documents} />}{" "}
           {view === "intelligence" && <IntelligenceWorkspace ops={ops} intelligence={intelligence} />}{" "}
           {view === "analytics" && <AnalyticsWorkspace ops={ops} />}{" "}
           {view === "integrations" && <IntegrationsWorkspace ops={ops} trafficLive={intelligence.traffic.source === "ontario-511"} />}{" "}
