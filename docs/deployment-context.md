@@ -248,22 +248,42 @@ and four security headers (`X-Content-Type-Options`, `Referrer-Policy`, `Permiss
   environment will produce a bundle with no Supabase configuration and silently run in demo mode.
 - **`APP_ORIGIN` must match the real public origin** or the traffic gateway's CORS will reject
   browser requests.
-- **CI currently targets `windows-latest` and has no deploy job.** The only workflow runs the
-  quality gate. Building images, pushing to a registry, and releasing to a host all need to be
-  written. All scripts are cross-platform now, so a Linux runner would work and be cheaper.
-- **Nothing in the stack terminates TLS.** `web-server` speaks plain HTTP. A public deployment needs
-  a reverse proxy (Caddy, nginx, or a provider edge) in front of it.
-- **`docker compose build` runs `npm ci` and `vite build` inside the image.** On a small host (1 GB
-  RAM) this can be killed by the OOM reaper. Building images in CI and having the host pull them
-  avoids the problem entirely and is the recommended pattern.
 - **`ports` in an override file merges rather than replaces.** Use the `!override` tag to change the
   published port.
+- **The public origin must be added to Supabase's redirect allowlist and Site URL**, or magic-link
+  sign-in redirects to the wrong host.
+- **`APP_ORIGIN` must match the public origin** or the traffic gateway's CORS refuses browser calls.
+- **Database migrations are not part of the deploy pipeline.** They are applied out of band, and
+  rolling containers back does not roll back schema.
 - The Java version is inconsistent between paths: local build targets Java 17, the Docker image uses
   JDK 21. Both work; worth aligning eventually.
 
 ---
 
-## 13. What is explicitly not required
+## 13. Deployment pipeline
+
+`.github/workflows/deploy.yml` runs on every push to `main`:
+
+```
+quality gate ──▶ build 4 images ──▶ push to ghcr.io ──▶ ssh: pull + up ──▶ probe /healthz
+```
+
+Images are built in CI, never on the host, so a small droplet is never asked to run `npm ci` or
+`vite build`. Each image is tagged with both `latest` and the commit SHA, making rollback a matter of
+re-running compose with an earlier `IMAGE_TAG`.
+
+`docker-compose.prod.yml` pulls those images rather than building. It binds the web container to
+`127.0.0.1:8080`, so the only route in is Caddy, which terminates TLS (`deploy/Caddyfile`).
+
+The Caddy config handles `/api/telemetry/events` as a separate route with `flush_interval -1` and no
+compression. That is load-bearing: the telemetry stream is Server-Sent Events, and a proxy that
+buffers or gzips it will leave the live map frozen while the connection stays open.
+
+Setup instructions, the required secrets, and the pre-DNS fallback are in `deploy/README.md`.
+
+---
+
+## 14. What is explicitly not required
 
 To avoid over-engineering advice: this project does not need a CDN, autoscaling, a load balancer,
 multi-region deployment, a managed Kubernetes cluster, a separate API gateway, Redis, a message
