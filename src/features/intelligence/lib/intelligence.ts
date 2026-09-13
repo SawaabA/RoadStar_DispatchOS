@@ -247,12 +247,14 @@ export function providerStatuses(options: {
   const tms = options.external?.tms;
   const eld = options.external?.eld;
   const routing = options.external?.routing;
+  const ai = options.external?.ai;
   return [
     { id: "tms", category: "TMS", provider: tms?.provider || "No production TMS configured", mode: tms?.status === "connected" ? "live" : "ready", status: tms?.status === "connected" ? "connected" : tms?.status === "degraded" ? "degraded" : "available", capabilities: ["Loads", "Assignments", "Stops"], swapTarget: "Set TMS health URL and API credential" },
     { id: "eld", category: "ELD / Telematics", provider: eld?.status === "connected" ? eld.provider : options.simulatorLive ? "RoadStar SSE simulator" : "Browser telemetry provider", mode: eld?.status === "connected" ? "live" : options.simulatorLive ? "demo" : "fallback", status: eld?.status === "connected" ? "connected" : eld?.status === "degraded" ? "degraded" : options.simulatorLive ? "available" : "degraded", capabilities: ["GPS", "Speed", "HOS clocks"], swapTarget: "Set ELD health URL and use the RoadStar SSE contract" },
     { id: "routing", category: "Routing", provider: routing?.provider || "Presentation geometry", mode: routing?.status === "configured" ? "ready" : "fallback", status: routing?.status === "configured" ? "available" : "degraded", capabilities: ["Distance", "ETA", "Road route geometry"], swapTarget: "Configure an OSRM-compatible routing service" },
     { id: "traffic", category: "Traffic", provider: options.trafficLive ? "Ontario 511" : "RoadStar incident fallback", mode: options.trafficLive ? "live" : "fallback", status: options.trafficLive ? "connected" : "degraded", capabilities: ["Events", "Construction", "Closures"], swapTarget: "Alternate provincial traffic feed" },
     { id: "loading", category: "Loading", provider: options.solver.startsWith("xflp") ? "xflp 0.7.7" : "Browser shelf packer", mode: options.solver.startsWith("xflp") ? "live" : "fallback", status: options.solver.startsWith("xflp") ? "connected" : "degraded", capabilities: ["Geometry", "Stop order", "Verified axle models"], swapTarget: "skjolber 3D bin packer" },
+    { id: "ai", category: "AI", provider: "SPUR Compute · Canadian-hosted models", mode: ai?.status === "connected" ? "live" : ai?.status === "configured" ? "ready" : "fallback", status: ai?.status === "connected" ? "connected" : ai?.status === "configured" ? "available" : "degraded", capabilities: ["Copilot narration", "Document extraction", "POD classification"], swapTarget: "Any OpenAI-compatible endpoint via SPUR_BASE_URL" },
     { id: "database", category: "Database", provider: options.cloud ? "Supabase Postgres / PostGIS" : "Local deterministic state", mode: options.cloud ? "live" : "demo", status: "connected", capabilities: ["RLS", "Realtime", "Geospatial"], swapTarget: "Portable PostgreSQL" },
   ];
 }

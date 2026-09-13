@@ -29,7 +29,8 @@ function log(level, event, context = {}) {
 
 async function proxy(request, response) {
   const requestId = String(request.headers["x-request-id"] || randomUUID());
-  const target = request.url.startsWith("/api/traffic") || request.url.startsWith("/api/routing") || request.url.startsWith("/api/integrations")
+  const aiRoute = request.url.startsWith("/api/ai/");
+  const target = aiRoute || request.url.startsWith("/api/traffic") || request.url.startsWith("/api/routing") || request.url.startsWith("/api/integrations")
     ? targets.integrations
     : request.url.startsWith("/api/telemetry") ? targets.telemetry : targets.solver;
   const chunks = [];
@@ -44,7 +45,15 @@ async function proxy(request, response) {
     chunks.push(chunk);
   }
   try {
-    const upstream = await fetch(`${target}${request.url}`, { method: request.method, headers: { "content-type": request.headers["content-type"] || "application/json", "x-request-id": requestId }, body: chunks.length ? Buffer.concat(chunks) : undefined, signal: request.url === "/api/telemetry/events" ? undefined : AbortSignal.timeout(10_000) });
+    const forwarded = { "content-type": request.headers["content-type"] || "application/json", "x-request-id": requestId };
+    // Only AI routes need the caller's Supabase session, and only they receive
+    // it; every other upstream continues to get no credentials.
+    if (aiRoute && request.headers.authorization) forwarded.authorization = request.headers.authorization;
+    // Model calls can outlast the 10s budget that suits the other services. The
+    // gateway enforces its own per-call timeout and answers with a fallback, so
+    // this only needs to be longer than that.
+    const timeoutMs = aiRoute ? 45_000 : 10_000;
+    const upstream = await fetch(`${target}${request.url}`, { method: request.method, headers: forwarded, body: chunks.length ? Buffer.concat(chunks) : undefined, signal: request.url === "/api/telemetry/events" ? undefined : AbortSignal.timeout(timeoutMs) });
     const headers = { ...securityHeaders, "X-Request-ID": requestId };
     for (const [key, value] of upstream.headers) if (!["connection", "transfer-encoding", "content-length", "access-control-allow-origin", "x-request-id"].includes(key)) headers[key] = value;
     response.writeHead(upstream.status, headers);

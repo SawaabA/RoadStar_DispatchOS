@@ -49,7 +49,17 @@ Create `/opt/roadstar/.env`, which compose reads automatically:
 
 ```bash
 APP_ORIGIN=https://roadstardispatch.xyz
+
+# RoadStar AI. Read by the integration gateway, never compiled into the bundle.
+SPUR_API_KEY=sk-spur-...
+# The gateway verifies AI callers with Supabase. These are the same
+# browser-safe values as the VITE_SUPABASE_* repository secrets.
+SUPABASE_URL=https://<project-ref>.supabase.co
+SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
 ```
+
+Without `SPUR_API_KEY` the rest of the application runs normally and the Integrations screen reports the
+AI provider as not configured. Model choices (`SPUR_MODEL_*`) have working defaults; see `.env.example`.
 
 Only port 80 and 443 need to be open. The application container binds to `127.0.0.1:8080`, so it is
 unreachable from the internet except through Caddy.

@@ -60,6 +60,6 @@ npm start            # serve the built production app on :8080
 
 Set the browser-safe Supabase values in `.env.local`, then run `docker compose --env-file .env.local up --build` and open `http://localhost:8080`. On a host, set `APP_ORIGIN` to the public HTTPS origin. For a self-hosted Ontario routing engine, prepare the map once with `npm run osrm:prepare`, then start the complete stack with `npm run docker:osrm`. The graph is generated from the Geofabrik Ontario OpenStreetMap extract and stays outside Git. Configure production ELD/TMS adapters with server-only variables when those providers are required. Never provide a service-role key to the web build.
 
-See [P0 implementation](docs/P0-implementation.md), [P1 implementation](docs/P1-implementation.md), the [deployment runbook](docs/deployment.md), and the [deployment context briefing](docs/deployment-context.md).
+See [P0 implementation](docs/P0-implementation.md), [P1 implementation](docs/P1-implementation.md), [P2 AI features implementation](docs/P2-implementation.md), the [deployment runbook](docs/deployment.md), and the [deployment context briefing](docs/deployment-context.md).
 
 For authenticated role, realtime, cross-organization, driver-action, and concurrency verification, follow [the multi-user QA guide](docs/auth-testing.md), then run `npm run verify:auth` and `npm run verify:auth:workflow`.

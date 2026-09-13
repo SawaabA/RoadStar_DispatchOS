@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createDemoState } from "../data/demoData";
 import { buildMorningPlan, evaluateCandidate } from "../lib/optimizer";
-import { assignCandidate, transitionDriverAssignment, unassignLoad } from "../lib/stateTransitions";
+import { addLoad,
+  assignCandidate, transitionDriverAssignment, unassignLoad } from "../lib/stateTransitions";
 import { isDispatchState } from "../lib/stateValidation";
 import { updateGeofenceVisits } from "../lib/geofencing";
+import { draftToLoad, validateLoadDraft, type LoadDraft, type LoadDraftErrors } from "../lib/loadDraft";
 import type {
   Assignment,
   DecisionRecord,
@@ -43,6 +45,8 @@ export function useDispatchOperations() {
   >("local");
   const stateRef = useRef(state);
   const organizationId = useRef<number | null>(null);
+  // Mirrors the ref for components that must re-render when the workspace changes.
+  const [activeOrganizationId, setActiveOrganizationId] = useState<number | null>(null);
   const syncReady = useRef(false);
   const externalTelemetryAt = useRef(new Map<string, number>());
   const lastSyncedState = useRef<string | null>(null);
@@ -70,6 +74,7 @@ export function useDispatchOperations() {
     if (!supabase || !userEmail) {
       const leavingCloudWorkspace = organizationId.current !== null;
       organizationId.current = null;
+      setActiveOrganizationId(null);
       syncReady.current = false;
       lastSyncedState.current = null;
       snapshotRevision.current = 0;
@@ -99,6 +104,7 @@ export function useDispatchOperations() {
       const orgId = Number(membership.organization_id);
       const role = membership.role as OrganizationRole;
       organizationId.current = orgId;
+      setActiveOrganizationId(orgId);
       setMemberRole(role);
       if (role === "driver") {
         const { data: link, error: linkError } = await client
@@ -272,6 +278,18 @@ export function useDispatchOperations() {
       if (!candidate.feasible || !canManageDispatch) return false;
       setState((current) => assignCandidate(current, candidate, status));
       return true;
+    },
+    [canManageDispatch],
+  );
+
+  const createLoad = useCallback(
+    (draft: LoadDraft): { ok: true; loadId: string } | { ok: false; errors: LoadDraftErrors } => {
+      if (!canManageDispatch) return { ok: false, errors: { billNumber: "Your role cannot create loads." } };
+      const errors = validateLoadDraft(draft, stateRef.current.loads);
+      if (Object.keys(errors).length) return { ok: false, errors };
+      const load = draftToLoad(draft, stateRef.current.loads);
+      setState((current) => addLoad(current, load));
+      return { ok: true, loadId: load.id };
     },
     [canManageDispatch],
   );
@@ -733,12 +751,14 @@ export function useDispatchOperations() {
     userEmail,
     memberRole,
     driverId,
+    organizationId: activeOrganizationId,
     canManageDispatch,
     actionError,
     syncStatus,
     sendMagicLink,
     signOut,
     candidateFor,
+    createLoad,
     assign,
     unassign,
     generatePlan,
