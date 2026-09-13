@@ -8,3 +8,4 @@ services/loading-solver/out
 test-results
 playwright-report
 data/raw
+deploy/osrm/data

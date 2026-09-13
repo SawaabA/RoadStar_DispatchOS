@@ -16,7 +16,11 @@
     "test:e2e": "playwright test",
     "preview": "vite preview",
     "quality": "powershell -ExecutionPolicy Bypass -File scripts/run-quality-gate.ps1",
-    "verify:deployment": "node --env-file=.env scripts/verify-deployment.mjs"
+    "verify:deployment": "node --env-file=.env scripts/verify-deployment.mjs",
+    "verify:auth": "node --env-file=.env --env-file-if-exists=.env.qa.local scripts/verify-auth-boundaries.mjs",
+    "verify:auth:workflow": "node --env-file=.env --env-file-if-exists=.env.qa.local scripts/verify-auth-workflow.mjs",
+    "osrm:prepare": "node scripts/prepare-osrm.mjs",
+    "docker:osrm": "docker compose -f docker-compose.yml -f docker-compose.osrm.yml up --build"
   },
   "dependencies": {
     "@react-three/drei": "10.7.8",

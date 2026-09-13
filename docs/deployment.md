@@ -46,6 +46,24 @@ Required browser build variables are `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBL
 docker compose --env-file .env.local up --build
 ```
 
+### Self-hosted Ontario routing
+
+For the RoadStar-managed OSRM option, install Docker Desktop and allow at least
+15 GB of free disk space. Prepare the current Ontario graph, then start Compose
+with the routing override:
+
+```powershell
+npm run osrm:prepare
+npm run docker:osrm
+```
+
+The graph is downloaded from Geofabrik, checksum-verified, and processed with
+OSRM's MLD pipeline. It remains in `deploy/osrm/data` and is excluded from both
+Git and Docker build contexts. Only the integration gateway can reach OSRM;
+the browser continues to use `/api/routing/route`. When routing is required,
+gateway readiness now checks that OSRM can snap a Toronto coordinate rather
+than treating a configured URL as proof of availability.
+
 After the stack or hosted URL is live, verify it together with the expected database version:
 
 ```powershell

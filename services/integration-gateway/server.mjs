@@ -14,6 +14,7 @@ const providerChecks = [
 ];
 const cacheMs = 60_000;
 let cache;
+let routingHealthCache;
 const metrics = { requests: 0, errors: 0, trafficFetches: 0, routingRequests: 0 };
 
 const baseHeaders = {
@@ -109,6 +110,25 @@ async function checkExternalProvider(provider) {
   }
 }
 
+async function checkRoutingProvider() {
+  if (!routingBaseUrl) return { id: "routing", provider: process.env.ROUTING_PROVIDER || "OSRM-compatible routing", status: "not_configured" };
+  if (routingHealthCache && Date.now() - routingHealthCache.checkedAt < 10_000) return routingHealthCache.value;
+  const value = { id: "routing", provider: process.env.ROUTING_PROVIDER || "OSRM-compatible routing", status: "degraded" };
+  try {
+    const url = new URL(`${routingBaseUrl}/nearest/v1/driving/-79.3832,43.6532`);
+    url.searchParams.set("number", "1");
+    const headers = routingToken ? { Authorization: `Bearer ${routingToken}` } : undefined;
+    const response = await fetch(url, { headers, signal: AbortSignal.timeout(5_000) });
+    const payload = response.ok ? await response.json() : undefined;
+    value.status = response.ok && payload?.code === "Ok" && payload?.waypoints?.length ? "connected" : "degraded";
+    value.httpStatus = response.status;
+  } catch {
+    value.status = "degraded";
+  }
+  routingHealthCache = { checkedAt: Date.now(), value };
+  return value;
+}
+
 const server = createServer(async (request, response) => {
   const requestId = String(request.headers["x-request-id"] || randomUUID());
   const startedAt = Date.now();
@@ -124,13 +144,17 @@ const server = createServer(async (request, response) => {
   }
   if (url.pathname === "/readyz") {
     const routingRequired = process.env.REQUIRE_ROUTING === "true";
-    const ready = !routingRequired || Boolean(routingBaseUrl);
-    writeJson(response, ready ? 200 : 503, { status: ready ? "ready" : "not_ready", routingConfigured: Boolean(routingBaseUrl) }, requestId);
+    const routing = await checkRoutingProvider();
+    const ready = !routingRequired || routing.status === "connected";
+    writeJson(response, ready ? 200 : 503, { status: ready ? "ready" : "not_ready", routing }, requestId);
     return;
   }
   if (url.pathname === "/api/integrations/health") {
-    const external = await Promise.all(providerChecks.map(checkExternalProvider));
-    writeJson(response, 200, { status: "ok", checkedAt: new Date().toISOString(), providers: [...external, { id: "routing", provider: process.env.ROUTING_PROVIDER || "OSRM-compatible routing", status: routingBaseUrl ? "configured" : "not_configured" }, { id: "traffic", provider: "Ontario 511", status: "connected" }] }, requestId, { "Cache-Control": "no-store" });
+    const [external, routing] = await Promise.all([
+      Promise.all(providerChecks.map(checkExternalProvider)),
+      checkRoutingProvider(),
+    ]);
+    writeJson(response, 200, { status: "ok", checkedAt: new Date().toISOString(), providers: [...external, routing, { id: "traffic", provider: "Ontario 511", status: "connected" }] }, requestId, { "Cache-Control": "no-store" });
     return;
   }
   if (url.pathname === "/api/traffic/incidents") {

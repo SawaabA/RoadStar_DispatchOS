@@ -203,3 +203,5 @@ supabase/.temp/
 test-results
 playwright-report/
 blob-report/
+deploy/osrm/data/*
+!deploy/osrm/data/.gitkeep
