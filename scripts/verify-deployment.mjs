@@ -1,7 +1,7 @@
 const baseUrl = (process.env.ROADSTAR_BASE_URL || "http://127.0.0.1:8080").replace(/\/$/, "");
 const supabaseUrl = process.env.VITE_SUPABASE_URL?.replace(/\/$/, "");
 const supabaseKey = process.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-const expectedSchema = process.env.EXPECTED_SCHEMA_VERSION || "20260912231741";
+const expectedSchema = process.env.EXPECTED_SCHEMA_VERSION || "20260913055147";
 let failed = false;
 
 async function check(name, operation) {

@@ -43,6 +43,7 @@ import type {
   Driver,
 } from "../features/dispatch/types";
 import { isSupabaseConfigured } from "../shared/lib/supabase";
+import { isAuthCallbackHash } from "../shared/lib/authCallback";
 import "./styles.css";
 
 type View =
@@ -1416,9 +1417,13 @@ export default function App() {
     if (ops.memberRole === "driver" && view !== "driver" && view !== "map") setView("driver");
   }, [ops.memberRole, view]);
   useEffect(() => {
-    window.history.replaceState(null, "", `#${view}`);
     document.title = `${title} · RoadStar DispatchOS`;
-  }, [view, title]);
+    // Never clobber a magic-link callback hash: auth-js reads it asynchronously
+    // and would otherwise find the session already gone. userEmail is a
+    // dependency so the route hash is restored once auth has settled.
+    if (isAuthCallbackHash(window.location.hash)) return;
+    window.history.replaceState(null, "", `#${view}`);
+  }, [view, title, ops.userEmail]);
   useEffect(() => {
     const openLoadSearch = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "k") return;

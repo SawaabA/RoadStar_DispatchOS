@@ -1,0 +1,54 @@
+# Production stack. Unlike docker-compose.yml this builds nothing: it pulls
+# images that CI already built and pushed, so a small host never has to run
+# `npm ci` or `vite build` and cannot be killed by the OOM reaper.
+#
+# IMAGE_PREFIX and IMAGE_TAG are exported by the deploy workflow. The defaults
+# let an operator run this by hand on the host.
+
+services:
+  web:
+    image: ${IMAGE_PREFIX:-ghcr.io/sawaaba/roadstar_dispatchos}-web:${IMAGE_TAG:-latest}
+    environment:
+      SOLVER_URL: http://solver:7070
+      SIMULATOR_URL: http://simulator:7071
+      INTEGRATION_URL: http://integrations:7072
+    # Bound to loopback only. Caddy terminates TLS and is the sole way in.
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      - solver
+      - simulator
+      - integrations
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  solver:
+    image: ${IMAGE_PREFIX:-ghcr.io/sawaaba/roadstar_dispatchos}-solver:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    expose:
+      - "7070"
+
+  simulator:
+    image: ${IMAGE_PREFIX:-ghcr.io/sawaaba/roadstar_dispatchos}-simulator:${IMAGE_TAG:-latest}
+    environment:
+      SIMULATOR_HOST: 0.0.0.0
+      # Pin the event sequence so a rehearsed demo replays identically.
+      SIMULATOR_SEED: ${SIMULATOR_SEED:-20260913}
+    restart: unless-stopped
+    expose:
+      - "7071"
+
+  integrations:
+    image: ${IMAGE_PREFIX:-ghcr.io/sawaaba/roadstar_dispatchos}-integrations:${IMAGE_TAG:-latest}
+    environment:
+      INTEGRATION_HOST: 0.0.0.0
+      # Must match the public origin or the browser's traffic calls are refused.
+      APP_ORIGIN: ${APP_ORIGIN:-https://roadstardispatch.xyz}
+    restart: unless-stopped
+    expose:
+      - "7072"

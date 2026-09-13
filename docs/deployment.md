@@ -4,16 +4,21 @@
 
 From a clean checkout with Node.js 22 and Java 21:
 
-```powershell
+```bash
 npm ci
+npx playwright install --with-deps chromium
 npm run quality
 ```
+
+Continuous delivery runs the same gate. `.github/workflows/deploy.yml` builds and publishes the four
+container images on every push to `main`, then pulls and restarts them on the droplet. Host setup,
+required secrets and rollback are documented in [`deploy/README.md`](../deploy/README.md).
 
 ## Supabase
 
 Use staging and production projects where possible. Authenticate, link the intended project, review parity, then push once:
 
-```powershell
+```bash
 npx supabase login
 npx supabase link --project-ref YOUR_PROJECT_REF
 npx supabase migration list
@@ -42,8 +47,12 @@ Use the real external driver identifier instead of `D-131`. The database RPC per
 
 Required browser build variables are `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`. Runtime variables include `APP_ORIGIN`, `SOLVER_URL`, `SIMULATOR_URL`, `INTEGRATION_URL`, `PORT`, and `HOST`. Provider credentials are server-only; see `.env.example` and the integration gateway README. Never place a password, secret key, or `service_role` key in a `VITE_` variable.
 
-```powershell
+```bash
+# local, builds from source
 docker compose --env-file .env.local up --build
+
+# production, pulls images CI already published
+IMAGE_TAG=latest docker compose -f docker-compose.prod.yml up -d
 ```
 
 ### Self-hosted Ontario routing

@@ -1,0 +1,186 @@
+name: Deploy to production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Never let two releases interleave on the same host.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  quality:
+    name: Release gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run quality
+
+  images:
+    name: Build and push images
+    needs: quality
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        service: [web, solver, simulator, integrations]
+    steps:
+      - uses: actions/checkout@v4
+
+      # GHCR requires a lowercase path; the repository name is mixed case.
+      - name: Resolve image name
+        id: image
+        run: echo "name=${REGISTRY}/${GITHUB_REPOSITORY,,}-${{ matrix.service }}" >> "$GITHUB_OUTPUT"
+
+      # Publishing a web image with no Supabase configuration would tag a
+      # demo-mode bundle as latest, which fails silently at runtime.
+      - name: Require browser build configuration
+        if: matrix.service == 'web'
+        env:
+          URL: ${{ secrets.VITE_SUPABASE_URL }}
+          KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          if [ -z "$URL" ] || [ -z "$KEY" ]; then
+            echo "::error::VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY are required repository secrets. Without them the web bundle ships with no cloud configuration and stays in local demo mode. See deploy/README.md."
+            exit 1
+          fi
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.${{ matrix.service }}
+          push: true
+          tags: |
+            ${{ steps.image.outputs.name }}:latest
+            ${{ steps.image.outputs.name }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+          # Only Dockerfile.web declares these; the others ignore them. They are
+          # browser-safe publishable values, compiled into the bundle by Vite.
+          build-args: |
+            VITE_SUPABASE_URL=${{ secrets.VITE_SUPABASE_URL }}
+            VITE_SUPABASE_PUBLISHABLE_KEY=${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
+
+  release:
+    name: Release to droplet
+    needs: images
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require deployment configuration
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          missing=""
+          [ -n "$DEPLOY_HOST" ] || missing="$missing DEPLOY_HOST"
+          [ -n "$DEPLOY_USER" ] || missing="$missing DEPLOY_USER"
+          [ -n "$DEPLOY_SSH_KEY" ] || missing="$missing DEPLOY_SSH_KEY"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing required repository secrets:$missing. Images were published successfully; only the release to the droplet was skipped. See deploy/README.md."
+            exit 1
+          fi
+
+      - name: Authorise SSH
+        env:
+          # Passed through the environment rather than interpolated into the
+          # script, so newlines and shell metacharacters survive intact.
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+          # Fail here with a readable message rather than inside scp, where a
+          # mangled key surfaces only as "error in libcrypto".
+          if ! ssh-keygen -y -f ~/.ssh/id_ed25519 > /dev/null 2>&1; then
+            echo "::error::DEPLOY_SSH_KEY is not a readable OpenSSH private key. It must be the full private key including the BEGIN and END lines, with its line breaks intact. Copy it from a file (wl-copy < key) rather than from terminal output, which can wrap or truncate it."
+            exit 1
+          fi
+
+          if [ -n "$DEPLOY_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            echo "::warning::DEPLOY_KNOWN_HOSTS is unset; trusting the host key on first use."
+            ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          fi
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Resolve image prefix
+        run: echo "IMAGE_PREFIX=${REGISTRY}/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
+      - name: Copy compose file
+        env:
+          SSH_HOST: ${{ secrets.DEPLOY_HOST }}
+          SSH_USER: ${{ secrets.DEPLOY_USER }}
+          TARGET: ${{ vars.DEPLOY_PATH || '/opt/roadstar' }}
+        run: scp -o StrictHostKeyChecking=yes docker-compose.prod.yml "$SSH_USER@$SSH_HOST:$TARGET/docker-compose.prod.yml"
+
+      - name: Pull and restart
+        env:
+          SSH_HOST: ${{ secrets.DEPLOY_HOST }}
+          SSH_USER: ${{ secrets.DEPLOY_USER }}
+          TARGET: ${{ vars.DEPLOY_PATH || '/opt/roadstar' }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+          TAG: ${{ github.sha }}
+        run: |
+          ssh -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" bash -s <<EOF
+          set -euo pipefail
+          cd '$TARGET'
+          echo '$TOKEN' | docker login '$REGISTRY' -u '$ACTOR' --password-stdin
+          export IMAGE_PREFIX='$IMAGE_PREFIX'
+          export IMAGE_TAG='$TAG'
+          docker compose -f docker-compose.prod.yml pull --quiet
+          docker compose -f docker-compose.prod.yml up -d --remove-orphans
+          docker image prune -f
+          docker logout '$REGISTRY'
+          EOF
+
+      - name: Verify the deployment answers
+        env:
+          ORIGIN: ${{ vars.APP_ORIGIN || 'https://roadstardispatch.xyz' }}
+        run: |
+          for attempt in $(seq 1 12); do
+            if curl -fsS --max-time 10 "$ORIGIN/healthz" > /dev/null; then
+              echo "healthz OK after $attempt attempt(s)"
+              curl -fsS --max-time 15 "$ORIGIN/api/telemetry/health"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::$ORIGIN/healthz did not respond after two minutes"
+          exit 1

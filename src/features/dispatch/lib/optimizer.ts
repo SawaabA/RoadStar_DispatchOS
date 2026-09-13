@@ -9,7 +9,12 @@ export const DEFAULT_OPTIMIZATION_WEIGHTS: OptimizationWeights = {
   futurePosition: 10,
 }
 
-const kmBetween = (a: {lat:number;lng:number}, b: {lat:number;lng:number}) => distance(point([a.lng,a.lat]), point([b.lng,b.lat]), { units:'kilometers' })
+// Great-circle distance understates road distance, so every measured leg
+// carries the same circuity correction. Applying it to the loaded trip but
+// not to the deadhead understated deadhead, which is the heaviest weighted
+// score component.
+const ROAD_CIRCUITY = 1.18
+const kmBetween = (a: {lat:number;lng:number}, b: {lat:number;lng:number}) => distance(point([a.lng,a.lat]), point([b.lng,b.lat]), { units:'kilometers' }) * ROAD_CIRCUITY
 const driveHours = (km: number) => km / 82
 
 export function evaluateCandidate(
@@ -23,7 +28,7 @@ export function evaluateCandidate(
 ): DispatchCandidate {
   const reasons: DispatchCandidate['reasons'] = []
   const deadheadKm = kmBetween(driver.point, load.originPoint)
-  const tripKm = kmBetween(load.originPoint, load.destinationPoint) * 1.18
+  const tripKm = kmBetween(load.originPoint, load.destinationPoint)
   const driving = driveHours(deadheadKm + tripKm)
   const projectedHours = driving + 1.5
   if (driver.status !== 'available') reasons.push({code:'status',label:'Driver or power unit is unavailable'})
