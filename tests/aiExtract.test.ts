@@ -139,14 +139,14 @@ describe("extraction normalization", () => {
   });
 });
 
-async function startStack(options: { role?: string; spur?: "ok" | "unsigned" | "damage" | "error"; storageType?: string } = {}) {
+async function startStack(options: { role?: string; spur?: "ok" | "unsigned" | "damage" | "error" | "context_window"; storageType?: string; storageBytes?: number } = {}) {
   const role = options.role ?? "driver";
   const supabase = await fakeServer((request, response) => {
     if (request.url === "/auth/v1/user") return reply(response, 200, { id: `user-${role}` });
     if (request.url?.startsWith("/rest/v1/organization_members")) return reply(response, 200, [{ organization_id: 1, role }]);
     if (request.url?.startsWith("/storage/v1/object/authenticated/load-documents/")) {
       response.writeHead(200, { "Content-Type": options.storageType ?? "image/jpeg" });
-      return response.end(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]));
+      return response.end(options.storageBytes ? Buffer.alloc(options.storageBytes, 0xff) : Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]));
     }
     if (request.url === "/rest/v1/rpc/record_load_document_extraction") return reply(response, 200, { id: DOC_ID });
     reply(response, 404, {});
@@ -154,6 +154,8 @@ async function startStack(options: { role?: string; spur?: "ok" | "unsigned" | "
   const spur = await fakeServer((_, response, body) => {
     const { model } = JSON.parse(body);
     if (options.spur === "error") return reply(response, 503, { detail: "down" });
+    // SPUR's real refusal when its estimate of the base64 input is over the window.
+    if (options.spur === "context_window") return reply(response, 400, { detail: "input (~32864 tokens) exceeds this tier's 32768-token context window - use a larger-context model tier" });
     const pod = {
       fields: { document_type: options.spur === "damage" ? "damage_photo" : "pod", consignee: "Northern Foods DC", reference_numbers: ["RS-4521"], signature_evidence: options.spur === "ok" ? "handwritten_mark" : "blank_line", signature_name: options.spur === "unsigned" ? null : "J. Patel", delivered_at: "2026-09-13 14:05", pallets_received: 18, condition_notes: null },
       source_text: { consignee: "Northern Foods DC", signature_name: "J. Patel" },
@@ -261,6 +263,42 @@ describe("extraction route", () => {
     const second = await (await call({ schema: "rate_confirmation", text: RATE_CON })).json();
     expect(second.cached).toBe(true);
     expect(spur.requests).toHaveLength(calls);
+  }, 15_000);
+
+  test("refuses images over the vision budget without calling the model", async () => {
+    const { call, spur } = await startStack({ role: "dispatcher" });
+    const oversized = `data:image/jpeg;base64,${"A".repeat(120_000)}`;
+    const response = await call({ schema: "rate_confirmation", images: [oversized] });
+    expect(response.status).toBe(413);
+    expect((await response.json()).code).toBe("input_too_large");
+    expect(spur.requests).toHaveLength(0);
+  }, 15_000);
+
+  test("images inside the budget are sent to the model", async () => {
+    const { call, spur } = await startStack({ role: "dispatcher" });
+    const response = await call({ schema: "rate_confirmation", images: [`data:image/jpeg;base64,${"A".repeat(90_000)}`] });
+    expect(response.status).toBe(200);
+    expect(spur.requests).toHaveLength(1);
+  }, 15_000);
+
+  test("reports the provider's context-window refusal as a too-large image, not an unreadable one", async () => {
+    const { call, supabase } = await startStack({ spur: "context_window" });
+    const result = await (await call({ schema: "pod", storagePath: "1/L-4521/pod-a.jpg", documentId: DOC_ID })).json();
+    expect(result).toMatchObject({ fallback: true, reason: "input_too_large", stored: true });
+    expect(result.warnings[0]).toMatch(/too large/);
+    const stored = JSON.parse(supabase.requests.find((item) => item.url === "/rest/v1/rpc/record_load_document_extraction")!.body);
+    expect(stored.p_status).toBe("failed");
+  }, 15_000);
+
+  test("records an oversized stored photo as a failed read without calling the model", async () => {
+    const { call, spur, supabase } = await startStack({ storageBytes: 100_000 });
+    const response = await call({ schema: "pod", storagePath: "1/L-4521/pod-big.jpg", documentId: DOC_ID });
+    const result = await response.json();
+    expect(response.status).toBe(200);
+    expect(result).toMatchObject({ fallback: true, reason: "input_too_large", stored: true });
+    expect(spur.requests).toHaveLength(0);
+    const stored = JSON.parse(supabase.requests.find((item) => item.url === "/rest/v1/rpc/record_load_document_extraction")!.body);
+    expect(stored).toMatchObject({ p_status: "failed", p_signature_missing: false });
   }, 15_000);
 
   test("requires exactly one input", async () => {

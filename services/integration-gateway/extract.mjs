@@ -10,6 +10,11 @@ const extractTimeoutMs = Number(process.env.SPUR_EXTRACT_TIMEOUT_MS) || 25_000;
 const maxTextLength = 120_000;
 const maxImages = 3;
 const maxDownloadBytes = 8 * 1024 * 1024;
+// SPUR's vision tier estimates input tokens from the base64 text and refuses
+// anything over its 32,768-token window, so images must stay under this many
+// characters in total. The browser encodes to a smaller budget
+// (VISION_PAYLOAD_CHARS in src/features/documents/lib/documents.ts).
+const maxVisionPayloadChars = 110_000;
 const cache = new Map();
 const cacheMs = 30 * 60_000;
 
@@ -34,7 +39,7 @@ const SCHEMAS = {
       temperature_controlled: "boolean",
       commodity: "string",
     },
-    guidance: "origin and destination are the city and province or state as written. equipment is Dry Van, Reefer or Flatbed when stated. rate_amount is the total rate as a plain number. Dates and times are copied exactly as written, never converted.",
+    guidance: "customer is the company tendering the load, often labelled Broker, Customer, Bill To or Shipper. reference_number is the load, confirmation, order or PO number, often labelled Load #, Conf # or Order #. temperature_controlled is true only when a temperature or reefer setting is stated, otherwise null. origin and destination are the city and province or state as written. equipment is Dry Van, Reefer or Flatbed when stated. rate_amount is the total rate as a plain number. Dates and times are copied exactly as written, never converted.",
   },
   bol: {
     roles: ["admin", "dispatcher"],
@@ -78,7 +83,7 @@ function systemPrompt(name) {
   return [
     `You extract fields from ${schema.description}`,
     "Use null for any field that is not present. Never infer, estimate, calculate or invent a value.",
-    "For every field you populate, copy the exact text you took it from into source_text.",
+    "For every field you populate, copy the exact text you took it from into source_text, keyed by the same field name used in fields (not by the document's label).",
     "Give each populated field a confidence between 0 and 1.",
     schema.guidance,
     `Return only JSON: {"fields": {\n${shape}\n}, "source_text": {"<field>": string | null}, "confidence": {"<field>": number}}`,
@@ -191,6 +196,10 @@ function parseRequest(body, identity) {
       || !images.every((image) => typeof image === "string" && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(image))) {
       throw new AiError(400, "invalid_input", `Provide 1 to ${maxImages} JPEG, PNG or WebP images as data URLs.`);
     }
+    // Refused here rather than spending a model call that is certain to fail.
+    if (images.join("").length > maxVisionPayloadChars) {
+      throw new AiError(413, "input_too_large", "The images are too large for the model to read. Re-encode them smaller.");
+    }
     return { schema, mode: "images", images, documentId };
   }
   const path = body.storagePath;
@@ -267,10 +276,34 @@ export async function handleExtract({ identity, body, requestId }) {
   const inputHash = createHash("sha256").update(request.mode === "text" ? request.text : images.join("|")).digest("hex");
   const cacheKey = `${identity.organizationId}:${request.schema}:${inputHash}`;
 
+  // The review form opens blank with a notice; extraction failing never blocks
+  // the dispatcher or loses the uploaded document.
+  const fallbackResult = (reason) => ({
+    schema: request.schema,
+    modelUsed: null,
+    extractionPath,
+    fields: blankFields,
+    confidence: {},
+    sourceSpans: {},
+    warnings: [
+      reason === "timeout" ? "Reading the document timed out — fill in the form manually"
+        : reason === "input_too_large" ? "The image is too large for the model to read — fill in the form manually"
+          : "The document could not be read — fill in the form manually",
+    ],
+    manualReview: true,
+    fallback: true,
+    reason,
+    cached: false,
+  });
+
   let result;
   const hit = cache.get(cacheKey);
   if (hit && hit.expiresAt > Date.now()) {
     result = { ...hit.value, cached: true };
+  } else if (request.mode === "storage" && images.join("").length > maxVisionPayloadChars) {
+    // A stored photo can be larger than the model accepts. It is recorded as a
+    // failed read so the document never sits waiting for an extraction.
+    result = fallbackResult("input_too_large");
   } else {
     const content = request.mode === "text"
       ? `Document text:\n${request.text}`
@@ -291,21 +324,7 @@ export async function handleExtract({ identity, body, requestId }) {
     } catch (error) {
       if (!(error instanceof AiError)) throw error;
       if (error.code === "model_not_allowed" || error.code === "auth_not_configured") throw error;
-      // The review form opens blank with a notice; extraction failing never
-      // blocks the dispatcher or loses the uploaded document.
-      result = {
-        schema: request.schema,
-        modelUsed: null,
-        extractionPath,
-        fields: blankFields,
-        confidence: {},
-        sourceSpans: {},
-        warnings: [error.code === "timeout" ? "Reading the document timed out — fill in the form manually" : "The document could not be read — fill in the form manually"],
-        manualReview: true,
-        fallback: true,
-        reason: error.code,
-        cached: false,
-      };
+      result = fallbackResult(error.code);
     }
   }
 

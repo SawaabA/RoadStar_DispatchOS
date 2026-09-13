@@ -172,6 +172,47 @@ test("dispatcher creates a load that joins the load board unassigned", async ({ 
   await expect(row).toContainText("Hamilton, ON");
 });
 
+test("document reader uses a PDF's text layer, renders scans, and fits images to the vision budget", async ({ page }) => {
+  const result = await page.evaluate(async () => {
+    const { readDocumentForExtraction } = await import("/src/features/documents/lib/documentReader.ts");
+    const pdf = async (name: string) => new File([await (await fetch(`/tests/fixtures/${name}`)).arrayBuffer()], name, { type: "application/pdf" });
+    const text = await readDocumentForExtraction(await pdf("rate-confirmation-text.pdf"));
+    const scan = await readDocumentForExtraction(await pdf("rate-confirmation-scan.pdf"));
+    const photoBlob = await (await fetch("/tests/fixtures/rate-confirmation-photo.jpg")).blob();
+    const photo = await readDocumentForExtraction(new File([photoBlob], "rate-confirmation.jpg", { type: "image/jpeg" }));
+    let broken = "";
+    try { await readDocumentForExtraction(new File([new Uint8Array([1, 2, 3])], "broken.pdf", { type: "application/pdf" })); }
+    catch (error) { broken = (error as Error).message; }
+    return {
+      textMode: text.mode,
+      textContent: text.mode === "text" ? text.text : "",
+      scanMode: scan.mode,
+      scanImages: scan.mode === "images" ? scan.images.length : 0,
+      scanPayload: scan.mode === "images" ? scan.images.join("").length : 0,
+      scanPrefix: scan.mode === "images" ? scan.images[0]!.slice(0, 23) : "",
+      photoMode: photo.mode,
+      photoRawChars: Math.ceil(photoBlob.size / 3) * 4,
+      photoPayload: photo.mode === "images" ? photo.images.join("").length : 0,
+      broken,
+    };
+  });
+
+  expect(result.textMode).toBe("text");
+  expect(result.textContent).toContain("MF-88213");
+  expect(result.textContent).toContain("31,200");
+  expect(result.scanMode).toBe("images");
+  expect(result.scanImages).toBe(1);
+  expect(result.scanPrefix).toBe("data:image/jpeg;base64,");
+  // SPUR's vision tier refuses more than about 125 KB of base64 per request, so
+  // every image path must come in under the browser budget of 96,000 characters.
+  expect(result.scanPayload).toBeLessThanOrEqual(96_000);
+  expect(result.photoMode).toBe("images");
+  // The fixture is over budget as a raw upload, so this proves re-encoding happened.
+  expect(result.photoRawChars).toBeGreaterThan(96_000);
+  expect(result.photoPayload).toBeLessThanOrEqual(96_000);
+  expect(result.broken).toBe("This file is not a readable PDF.");
+});
+
 test("historical replay labels opportunity rather than guaranteed savings", async ({ page }) => {
   await page.getByRole("button", { name: /^KPI & replay/ }).click();
   await page.getByRole("button", { name: "Run lane-match replay" }).click();

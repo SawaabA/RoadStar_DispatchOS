@@ -70,6 +70,7 @@ export async function spurChat({ model, messages, json = false, maxTokens = 1_20
   const startedAt = Date.now();
   let outcome = "error";
   let usage = null;
+  let providerError = null;
   try {
     const response = await fetch(`${spurBaseUrl}/chat/completions`, {
       method: "POST",
@@ -81,6 +82,17 @@ export async function spurChat({ model, messages, json = false, maxTokens = 1_20
     usage = payload?.usage ?? null;
     if (!response.ok) {
       outcome = `http_${response.status}`;
+      // The provider's error code and type say why a request was refused. The
+      // free-text message is not logged because it can quote the prompt.
+      providerError = [payload?.error?.code, payload?.error?.type].filter((part) => typeof part === "string" || typeof part === "number").join("/").slice(0, 80) || null;
+      // SPUR reports some refusals as {"detail": "..."} instead. Only a fixed
+      // classification is logged, never the detail text itself.
+      if (!providerError && typeof payload?.detail === "string") {
+        providerError = /context window|exceeds/i.test(payload.detail) ? "context_window_exceeded" : "detail_unclassified";
+      }
+      if (providerError === "context_window_exceeded") {
+        throw new AiError(413, "input_too_large", "The document is too large for the model to read.");
+      }
       throw new AiError(502, "provider_error", `SPUR returned ${response.status}.`);
     }
     const content = payload?.choices?.[0]?.message?.content;
@@ -105,6 +117,7 @@ export async function spurChat({ model, messages, json = false, maxTokens = 1_20
       requestId,
       model,
       outcome,
+      ...(providerError ? { providerError } : {}),
       latencyMs,
       promptTokens: usage?.prompt_tokens ?? null,
       completionTokens: usage?.completion_tokens ?? null,

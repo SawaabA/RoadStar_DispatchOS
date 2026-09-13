@@ -39,6 +39,8 @@ import { LoadDocumentsPanel } from "../features/documents/components/LoadDocumen
 import { PodCapture } from "../features/documents/components/PodCapture";
 import { useLoadDocuments } from "../features/documents/hooks/useLoadDocuments";
 import { NewLoadForm } from "../features/dispatch/components/NewLoadForm";
+import { IntakeImporter, type ImportedDocument } from "../features/documents/components/IntakeImporter";
+import { attachIntakeDocument } from "../features/documents/lib/documents";
 import { documentExceptions } from "../features/documents/lib/documentExceptions";
 import { AnalyticsWorkspace } from "../features/intelligence/components/AnalyticsWorkspace";
 import { IntegrationsWorkspace } from "../features/intelligence/components/IntegrationsWorkspace";
@@ -728,6 +730,8 @@ function DispatchBoard({
 
 function LoadsPage({ ops, documents }: { ops: ReturnType<typeof useDispatchOperations>; documents: ReturnType<typeof useLoadDocuments> }) {
   const [creatingLoad, setCreatingLoad] = useState(false);
+  const [imported, setImported] = useState<ImportedDocument | null>(null);
+  const [intakeMessage, setIntakeMessage] = useState<string | null>(null);
   const [query, setQuery] = useState(""),
     rows = ops.state.loads.filter((l) =>
       `${l.billNumber}${l.customer}${l.origin}${l.destination}`
@@ -745,9 +749,29 @@ function LoadsPage({ ops, documents }: { ops: ReturnType<typeof useDispatchOpera
             view.
           </p>
         </div>
-        <button className="btn primary" disabled={!ops.canManageDispatch} title={ops.canManageDispatch ? undefined : "Only dispatchers and admins can create loads"} onClick={() => setCreatingLoad(true)}>+ New load</button>
+        <button className="btn primary" disabled={!ops.canManageDispatch} title={ops.canManageDispatch ? undefined : "Only dispatchers and admins can create loads"} onClick={() => { setImported(null); setIntakeMessage(null); setCreatingLoad(true); }}>+ New load</button>
       </div>
-      {creatingLoad && <NewLoadForm onCreate={ops.createLoad} onClose={() => setCreatingLoad(false)} />}
+      {creatingLoad && <NewLoadForm
+        onCreate={(draft) => {
+          const result = ops.createLoad(draft);
+          // The load exists first; attaching its source document is best effort
+          // and reported, never a reason to undo the load.
+          if (result.ok && imported && ops.userEmail && ops.organizationId !== null) {
+            void attachIntakeDocument(ops.organizationId, result.loadId, imported.file)
+              .then(() => setIntakeMessage(`${draft.billNumber} created with its source document attached.`))
+              .catch((error: Error) => setIntakeMessage(`${draft.billNumber} was created, but its source document could not be attached: ${error.message}`));
+          }
+          return result;
+        }}
+        onClose={() => { setCreatingLoad(false); setImported(null); }}
+        initial={imported?.draft}
+        evidence={imported?.evidence}
+        importer={<IntakeImporter signedIn={Boolean(ops.userEmail)} onImported={setImported} />}
+        notice={imported && (imported.warnings.length > 0 || imported.notes.length > 0)
+          ? <ul className="intake-notes" aria-label="Import notes">{[...imported.warnings, ...imported.notes].map((note) => <li key={note}>{note}</li>)}</ul>
+          : null}
+      />}
+      {intakeMessage && <p className="intake-banner" role="status">{intakeMessage}</p>}
       <LoadDocumentsPanel documents={documents.documents} loads={ops.state.loads} signedIn={Boolean(ops.userEmail)} error={documents.error} />
       <section className="surface table-surface">
         <div className="table-toolbar">
