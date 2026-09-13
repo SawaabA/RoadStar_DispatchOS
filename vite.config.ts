@@ -10,6 +10,7 @@ export default defineConfig({
       "/api/routing": "http://127.0.0.1:7072",
       "/api/integrations": "http://127.0.0.1:7072",
       "/api/tms": "http://127.0.0.1:7072",
+      "/api/ai": "http://127.0.0.1:7072",
       "/api": "http://127.0.0.1:7070",
     },
   },

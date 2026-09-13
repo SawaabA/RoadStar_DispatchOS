@@ -45,7 +45,7 @@ Use the real external driver identifier instead of `D-131`. The database RPC per
 
 ## Runtime
 
-Required browser build variables are `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`. Runtime variables include `APP_ORIGIN`, `SOLVER_URL`, `SIMULATOR_URL`, `INTEGRATION_URL`, `PORT`, and `HOST`. Provider credentials are server-only; see `.env.example` and the integration gateway README. Never place a password, secret key, or `service_role` key in a `VITE_` variable.
+Required browser build variables are `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`. Runtime variables include `APP_ORIGIN`, `SOLVER_URL`, `SIMULATOR_URL`, `INTEGRATION_URL`, `PORT`, and `HOST`. Provider credentials are server-only; see `.env.example` and the integration gateway README. The integration gateway also needs `SPUR_API_KEY` for AI features and `SUPABASE_URL` / `SUPABASE_PUBLISHABLE_KEY` to verify AI callers; model selections default through `SPUR_MODEL_*`. Never place a password, secret key, or `service_role` key in a `VITE_` variable.
 
 ```bash
 # local, builds from source

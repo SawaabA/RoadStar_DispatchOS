@@ -13,3 +13,5 @@ combined with Row Level Security policies.
 The migration uses ordinary PostgreSQL plus PostGIS and is intentionally portable to the later Docker setup.
 
 The latest migration adds explicit user-to-driver links and a narrowly scoped driver transition RPC. Creating an auth account alone never grants RoadStar organization access.
+
+Migration `20260913082708` adds a private `load-documents` Storage bucket and the `load_documents` table for rate confirmations, bills of lading and proof-of-delivery files. Records are created and updated only through the `attach_load_document` and `record_load_document_extraction` functions. Its behaviour tests run in plain PostgreSQL; see `supabase/tests/load-documents/`.

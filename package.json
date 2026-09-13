@@ -9,7 +9,7 @@
     "dev:full": "concurrently --kill-others-on-fail -n SOLVER,SIM,INTEGRATIONS,WEB -c yellow,cyan,magenta,green \"npm:solver\" \"npm:simulator\" \"npm:integrations\" \"npm:dev\"",
     "solver": "node services/loading-solver/run.mjs",
     "simulator": "node services/telematics-simulator/server.mjs",
-    "integrations": "node services/integration-gateway/server.mjs",
+    "integrations": "node --env-file-if-exists=.env --env-file-if-exists=.env.local services/integration-gateway/server.mjs",
     "start": "node services/web-server/server.mjs",
     "build": "tsc -b && vite build",
     "test": "vitest run",
@@ -32,6 +32,7 @@
     "@turf/helpers": "7.4.0",
     "lucide-react": "^0.544.0",
     "maplibre-gl": "6.9.0",
+    "pdfjs-dist": "6.3.289",
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "three": "^0.180.0"
