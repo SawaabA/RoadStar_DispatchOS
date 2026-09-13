@@ -376,6 +376,10 @@ test("dispatcher creates a load that joins the load board unassigned", async ({ 
 });
 
 test("document reader uses a PDF's text layer, renders scans, and fits images to the vision budget", async ({ page }) => {
+  // This imports source modules, which only the Vite dev server serves. A
+  // deployed build correctly refuses them; the user-facing intake journey
+  // covers the same reader there.
+  test.skip(Boolean(process.env.PLAYWRIGHT_BASE_URL), "Imports source modules served only by the Vite dev server");
   const result = await page.evaluate(async () => {
     const { readDocumentForExtraction } = await import("/src/features/documents/lib/documentReader.ts");
     const pdf = async (name: string) => new File([await (await fetch(`/tests/fixtures/${name}`)).arrayBuffer()], name, { type: "application/pdf" });

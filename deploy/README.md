@@ -115,6 +115,12 @@ Keep `http://localhost:5173/**` in the redirect list so local development contin
 ## Before DNS resolves
 
 Caddy cannot obtain a certificate until `roadstardispatch.xyz` points at the droplet's public IP.
+
+### Hardening notes
+
+- **Caddyfile is applied by hand.** The deploy workflow does not copy `deploy/Caddyfile`. After changing it, copy it to `/etc/caddy/Caddyfile` and run `sudo systemctl reload caddy`. It sets `Strict-Transport-Security` and refuses `/metrics` at the edge; the web gateway enforces both as well, so they hold even with an older Caddyfile.
+- **`www` needs a DNS record.** Add a `CNAME` for `www` pointing to `roadstardispatch.xyz` (or an `A` record to the droplet). Until then Caddy cannot obtain a certificate for `www` and the redirect does not work.
+- **`/metrics` is host-only.** Requests relayed by Caddy carry `X-Forwarded-For` and receive 404. Read counters from the host with `curl http://127.0.0.1:8080/metrics`, or set `METRICS_TOKEN` in `/opt/roadstar/.env` and send `Authorization: Bearer <token>` from an external scraper.
 Until then, either wait, or serve over plain HTTP on the IP by replacing the site address in
 `/etc/caddy/Caddyfile`:
 

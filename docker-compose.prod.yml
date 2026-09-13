@@ -13,6 +13,9 @@ services:
       # Replace this with a private ELD adapter URL when a vendor is selected.
       SIMULATOR_URL: ${TELEMATICS_URL:-http://simulator:7071}
       INTEGRATION_URL: http://integrations:7072
+      # Optional. Lets an external scraper read /metrics through Caddy with
+      # `Authorization: Bearer <token>`; without it /metrics is host-only.
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
     # Bound to loopback only. Caddy terminates TLS and is the sole way in.
     ports:
       - "127.0.0.1:8080:8080"
