@@ -310,6 +310,23 @@ supabase/tests/load-documents/                 Postgres harness
 - **New copilot question:** add the id to `COPILOT_QUESTIONS` in both `copilot.mjs` and `copilotContext.ts`, build its facts deterministically in `buildCopilotRequest`, and add validation tests with a fabricated number and an unknown identifier.
 - **Any new image path:** encode with `encodeImage(source, VISION_PAYLOAD_CHARS)` or a share of it; never send an unbounded image to the gateway.
 
+## Related change: password sign-in (13 Sept 2026)
+
+Added after P2 so QA accounts and people without a reachable inbox can sign in. It is not an AI feature; it is recorded here so the full set of September changes is in one place.
+
+- **UI.** The sign-in dialog (`AuthModal` in `src/app/App.tsx`) has a **Password** (default) / **Email link** switch.
+  - The password form uses `autocomplete="username"` and `current-password`.
+  - The show-password toggle sits outside the `<label>`, so the field's accessible name stays "Password".
+  - The dialog closes once Supabase stores the session, and the existing `onAuthStateChange` listener switches the workspace.
+- **Hook.** `useDispatchOperations().signInWithPassword(email, password)` returns a message, or null on success.
+- **Messages.** `src/shared/lib/authMessages.ts` maps Supabase errors (`invalid_credentials`, `email_not_confirmed`, `over_*`/429, `user_banned`, network) to guidance. A wrong password and an unknown email produce the same message, so the form does not reveal which accounts exist.
+- **Not included, deliberately.** There is no sign-up or password-reset form. Accounts are created in Supabase, and access still requires an `organization_members` row. Project-level sign-ups remain enabled in Supabase, which was already true for magic links. Repeated password guesses are limited by Supabase Auth's rate limits.
+- **Tests.**
+  - `authMessages.test.ts` (7 tests).
+  - The browser journey `sign-in offers a password, explains a wrong password, and keeps the email link` stubs the Supabase token response and runs axe on the dialog. That check found the dialog's field labels at 4.05:1 contrast; they are now `#697871` (4.64:1).
+  - The browser journey `a provisioned dispatcher signs in with a password and signs out` signs in for real with `dispatcher-a` from `.env.qa.local` or the environment, and is skipped when neither is present, so CI needs no credentials.
+- **Merge note.** This branch was merged with `sawaab-v2` (PR #7: advanced cargo loads, load lifecycle actions, snapshot reconciliation polling, loading plan versions). The only conflict was both sides appending to the end of `src/app/styles.css`; both blocks were kept. On the Loads page, **+ New load** (P2 form with rate confirmation import, `createLoadFromDraft`) and **Advanced cargo load** (`NewLoadModal`, `createLoad`) now coexist.
+
 ## Honest boundaries
 
 - Extraction is a reading aid. Every value is reviewed by a person, and scanned or photographed documents are not source-quote checked (there is no text to check against), so confidence and the review step carry that risk.
