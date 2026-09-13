@@ -1,37 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
-import {
-  AlertTriangle,
-  ArrowRight,
-  Box,
-  Check,
-  ChevronDown,
-  CircleDollarSign,
-  Clock3,
-  Database,
-  Gauge,
-  Layers3,
-  LayoutDashboard,
-  ListFilter,
-  Map,
-  MapPin,
-  Menu,
-  Navigation,
-  PackageCheck,
-  Play,
-  Radio,
-  RefreshCw,
-  Route,
-  Search,
-  Settings2,
-  ShieldCheck,
-  Sparkles,
-  Timer,
-  Tractor,
-  Truck,
-  Users,
-  Warehouse,
-  X,
-} from "lucide-react";
+import { AlertTriangle, ArrowRight, Box, Check, ChevronDown, CircleDollarSign, Clock3, Database, Gauge, Layers3, LayoutDashboard, ListFilter, Map, MapPin, Menu, Navigation, PackageCheck, Play, Radio, RefreshCw, Route, Search, Settings2, ShieldCheck, Sparkles, Timer, Tractor, Truck, Users, Warehouse, X, Eye, EyeOff } from "lucide-react";
 import { useDispatchOperations } from "../features/dispatch/hooks/useDispatchOperations";
 import { useRoadIntelligence } from "../features/intelligence/hooks/useRoadIntelligence";
 import { IntelligenceWorkspace } from "../features/intelligence/components/IntelligenceWorkspace";
@@ -1341,18 +1309,36 @@ function AuthModal({
   ops: ReturnType<typeof useDispatchOperations>;
   onClose: () => void;
 }) {
+  const [method, setMethod] = useState<"password" | "link">("password");
   const [email, setEmail] = useState("");
-  const [message, setMessage] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [message, setMessage] = useState<{ tone: "info" | "error"; text: string } | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const chooseMethod = (next: "password" | "link") => {
+    setMethod(next);
+    setMessage(null);
+  };
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     setSubmitting(true);
-    setMessage("Sending secure link…");
     try {
+      if (method === "password") {
+        setMessage(null);
+        const error = await ops.signInWithPassword(email, password);
+        if (error) {
+          setMessage({ tone: "error", text: error });
+          return;
+        }
+        setPassword("");
+        onClose();
+        return;
+      }
+      setMessage({ tone: "info", text: "Sending secure link…" });
       const error = await ops.sendMagicLink(email);
-      setMessage(error || "Check your inbox for the RoadStar sign-in link.");
+      setMessage(error ? { tone: "error", text: error } : { tone: "info", text: "Check your inbox for the RoadStar sign-in link." });
     } catch {
-      setMessage("We could not send the link. Check your connection and try again.");
+      setMessage({ tone: "error", text: "RoadStar could not reach the sign-in service. Check your connection and try again." });
     } finally {
       setSubmitting(false);
     }
@@ -1405,23 +1391,61 @@ function AuthModal({
         ) : (
           <>
             <p className="modal-sub">
-              Enter your work email. Supabase will send a password-free sign-in
-              link; local demo mode remains available.
+              Sign in to work in your organization&apos;s shared workspace. Local
+              demo mode remains available without an account.
             </p>
+            <div className="segmented auth-method" role="group" aria-label="Sign-in method">
+              <button type="button" className={method === "password" ? "active" : ""} aria-pressed={method === "password"} onClick={() => chooseMethod("password")}>
+                Password
+              </button>
+              <button type="button" className={method === "link" ? "active" : ""} aria-pressed={method === "link"} onClick={() => chooseMethod("link")}>
+                Email link
+              </button>
+            </div>
             <label className="auth-field">
               WORK EMAIL
               <input
                 type="email"
+                name="email"
+                autoComplete="username"
                 required
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
                 placeholder="dispatcher@roadstar.ca"
               />
             </label>
+            {method === "password" ? (
+              <div className="auth-field">
+                {/* The toggle sits outside the label so the field's accessible name stays "Password". */}
+                <label htmlFor="auth-password">PASSWORD</label>
+                <span className="auth-password">
+                  <input
+                    id="auth-password"
+                    type={showPassword ? "text" : "password"}
+                    name="password"
+                    autoComplete="current-password"
+                    required
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                  />
+                  <button type="button" aria-label={showPassword ? "Hide password" : "Show password"} aria-pressed={showPassword} onClick={() => setShowPassword((current) => !current)}>
+                    {showPassword ? <EyeOff /> : <Eye />}
+                  </button>
+                </span>
+              </div>
+            ) : (
+              <p className="auth-hint">Supabase emails you a password-free sign-in link.</p>
+            )}
             <button className="btn primary full" type="submit" disabled={submitting}>
-              {submitting ? "Sending…" : "Email me a secure link"}
+              {method === "password"
+                ? submitting ? "Signing in…" : "Sign in"
+                : submitting ? "Sending…" : "Email me a secure link"}
             </button>
-            {message && <p className="auth-message" role="status">{message}</p>}
+            {message && (
+              <p className={message.tone === "error" ? "auth-message error" : "auth-message"} role={message.tone === "error" ? "alert" : "status"}>
+                {message.text}
+              </p>
+            )}
           </>
         )}
       </form>

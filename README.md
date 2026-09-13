@@ -38,7 +38,7 @@ npx supabase migration list
 npx supabase db push
 ```
 
-Signed-out visitors use a deterministic local demo. Selecting the user menu sends a Supabase magic link; authenticated dispatchers with an explicitly provisioned `organization_members` record share their organization state through Supabase Realtime. Account creation does not grant organization access automatically.
+Signed-out visitors use a deterministic local demo. Selecting the user menu opens sign-in with an email and password or a Supabase magic link; authenticated dispatchers with an explicitly provisioned `organization_members` record share their organization state through Supabase Realtime. Account creation does not grant organization access automatically.
 
 Authenticated driver accounts also require an explicit `driver_user_links` record. Drivers are restricted to the driver/map experience, and assignment acceptance, route start, and decline are validated and audited inside Postgres.
 

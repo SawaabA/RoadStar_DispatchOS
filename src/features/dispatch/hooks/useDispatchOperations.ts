@@ -18,6 +18,7 @@ import type {
 } from "../types";
 import type { BackhaulSuggestion, OperationalException, ReplanImpact } from "../../intelligence/types";
 import { supabase } from "../../../shared/lib/supabase";
+import { passwordSignInMessage } from "../../../shared/lib/authMessages";
 
 const STORAGE_KEY = "roadstar-dispatch-state-v2";
 
@@ -717,6 +718,17 @@ export function useDispatchOperations() {
     });
     return error?.message || null;
   }, []);
+  // Returns a message to show, or null once Supabase has stored the session;
+  // the auth state listener above then switches the workspace to the account.
+  const signInWithPassword = useCallback(async (email: string, password: string) => {
+    if (!supabase) return "Supabase is not configured.";
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+      return passwordSignInMessage(error);
+    } catch (error) {
+      return passwordSignInMessage({ message: error instanceof Error ? error.message : "", status: 0 });
+    }
+  }, []);
   const signOut = useCallback(async () => {
     await supabase?.auth.signOut();
   }, []);
@@ -756,6 +768,7 @@ export function useDispatchOperations() {
     actionError,
     syncStatus,
     sendMagicLink,
+    signInWithPassword,
     signOut,
     candidateFor,
     createLoad,

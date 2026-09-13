@@ -12,7 +12,7 @@ In Supabase **Authentication > Users**, create and auto-confirm these five passw
 - `viewer-a@roadstar.test`
 - `dispatcher-b@roadstar.test`
 
-Do not use real employee accounts. Password login is used only by the automated verifier; the RoadStar UI continues to use magic links.
+Do not use real employee accounts. These accounts can also sign in through the RoadStar UI (user menu, **Password**). The browser journey `a provisioned dispatcher signs in with a password and signs out` uses `dispatcher-a` from `.env.qa.local` or the environment, and is skipped when neither is present.
 
 ## 2. Provision roles
 

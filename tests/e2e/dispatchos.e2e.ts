@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 
@@ -125,6 +126,83 @@ test("copilot shows RoadStar's computed facts when no one is signed in", async (
   const results = await new AxeBuilder({ page }).include(".copilot-panel").analyze();
   const serious = results.violations.filter((item) => ["critical", "serious"].includes(item.impact ?? ""));
   expect(serious.map((item) => item.id)).toEqual([]);
+});
+
+// Dedicated QA accounts come from the environment or the Git-ignored
+// .env.qa.local (see docs/auth-testing.md). Without them the live sign-in
+// journey is skipped, so CI never needs real credentials.
+const qaAccounts: Record<string, string> = (() => {
+  try {
+    return Object.fromEntries(readFileSync(".env.qa.local", "utf8").split("\n")
+      .map((line) => line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/))
+      .filter((match): match is RegExpMatchArray => Boolean(match))
+      .map((match) => [match[1]!, match[2]!]));
+  } catch {
+    return {};
+  }
+})();
+const qaValue = (name: string) => process.env[name] || qaAccounts[name] || "";
+
+test("sign-in offers a password, explains a wrong password, and keeps the email link", async ({ page }) => {
+  let attempts = 0;
+  await page.route("**/auth/v1/token?grant_type=password", async (route) => {
+    attempts += 1;
+    await route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ code: 400, error_code: "invalid_credentials", msg: "Invalid login credentials" }) });
+  });
+  await page.goto("/");
+  await page.getByText("Demo Dispatcher", { exact: true }).first().click();
+  const dialog = page.getByRole("dialog", { name: "Connect your workspace" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Password", exact: true })).toHaveAttribute("aria-pressed", "true");
+
+  await dialog.getByLabel("WORK EMAIL").fill("dispatcher-a@roadstar.test");
+  const password = dialog.getByLabel("PASSWORD", { exact: true });
+  await password.fill("not-the-password");
+  await expect(password).toHaveAttribute("type", "password");
+  await expect(password).toHaveAttribute("autocomplete", "current-password");
+  await dialog.getByRole("button", { name: "Show password" }).click();
+  await expect(password).toHaveAttribute("type", "text");
+
+  await dialog.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(dialog.getByRole("alert")).toHaveText("Email or password is incorrect.");
+  expect(attempts).toBe(1);
+  await expect(dialog).toBeVisible();
+  await expect(page.getByText("Demo Dispatcher", { exact: true }).first()).toBeVisible();
+
+  const results = await new AxeBuilder({ page }).include(".auth-modal").analyze();
+  // Report the failing elements, not only the rule, so a regression is actionable.
+  expect(results.violations
+    .filter((violation) => ["serious", "critical"].includes(violation.impact ?? ""))
+    .flatMap((violation) => violation.nodes.map((node) => `${violation.id}: ${node.target.join(" ")} — ${node.failureSummary?.split("\n").slice(1).join(" ").trim()}`))).toEqual([]);
+
+  await dialog.getByRole("button", { name: "Email link", exact: true }).click();
+  await expect(dialog.getByLabel("PASSWORD", { exact: true })).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: "Email me a secure link" })).toBeVisible();
+  await expect(dialog.getByRole("alert")).toHaveCount(0);
+});
+
+test("a provisioned dispatcher signs in with a password and signs out", async ({ page }) => {
+  const email = qaValue("ROADSTAR_QA_DISPATCHER_A_EMAIL");
+  const password = qaValue("ROADSTAR_QA_DISPATCHER_A_PASSWORD");
+  test.skip(!email || !password, "Set ROADSTAR_QA_DISPATCHER_A_EMAIL and _PASSWORD, or create .env.qa.local");
+
+  await page.goto("/");
+  await page.getByText("Demo Dispatcher", { exact: true }).first().click();
+  const dialog = page.getByRole("dialog", { name: "Connect your workspace" });
+  await dialog.getByLabel("WORK EMAIL").fill(email);
+  await dialog.getByLabel("PASSWORD", { exact: true }).fill(password);
+  await dialog.getByRole("button", { name: "Sign in", exact: true }).click();
+
+  await expect(dialog).toBeHidden();
+  const accountName = email.split("@")[0]!;
+  await expect(page.getByText(accountName, { exact: true }).first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("Demo Dispatcher", { exact: true })).toHaveCount(0);
+
+  await page.getByText(accountName, { exact: true }).first().click();
+  const account = page.getByRole("dialog", { name: "Dispatcher account" });
+  await expect(account).toContainText(`Signed in as ${email}`);
+  await account.getByRole("button", { name: "Sign out" }).click();
+  await expect(page.getByText("Demo Dispatcher", { exact: true }).first()).toBeVisible({ timeout: 15_000 });
 });
 
 test("document features ask a signed-out user to sign in instead of failing", async ({ page }) => {

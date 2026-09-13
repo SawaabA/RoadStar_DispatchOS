@@ -163,7 +163,7 @@ Restarting the simulator resets simulated truck positions, which is cosmetic.
 
 ## 8. Authentication
 
-Supabase Auth, email magic link only (implicit flow). There is no password login in the UI.
+Supabase Auth with two sign-in methods in the UI: email and password (default), or an email magic link (implicit flow). The UI has no sign-up or password-reset form; accounts are created in Supabase and gain access only through `organization_members`. Wrong-password errors never reveal whether an account exists.
 
 Deployment-relevant consequence: **the deployed origin must be added to the Supabase redirect
 allowlist**, and the Site URL must match, or sign-in links will bounce to the wrong host. This is
