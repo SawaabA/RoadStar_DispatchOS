@@ -23,7 +23,20 @@ type Props = {
   onSelectIncident?: (id: string) => void;
 };
 
-const roadStyle = "https://tiles.openfreemap.org/styles/liberty";
+const roadStyle = {
+  version: 8 as const,
+  sources: {
+    streets: {
+      type: "raster" as const,
+      tiles: [
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
+      ],
+      tileSize: 256,
+      attribution: "Tiles © Esri",
+    },
+  },
+  layers: [{ id: "streets", type: "raster" as const, source: "streets" }],
+};
 const satelliteStyle = {
   version: 8 as const,
   sources: {
@@ -91,9 +104,11 @@ export function FleetMap({
       map.current = null;
     };
   }, []);
+  const previousSatellite = useRef(satellite);
   useEffect(() => {
-    if (map.current)
-      map.current.setStyle(satellite ? satelliteStyle : roadStyle);
+    if (!map.current || previousSatellite.current === satellite) return;
+    previousSatellite.current = satellite;
+    map.current.setStyle(satellite ? satelliteStyle : roadStyle);
   }, [satellite]);
   useEffect(() => {
     if (!map.current) return;
