@@ -149,7 +149,7 @@ docker compose -f docker-compose.prod.yml up -d
 
 ## Ontario routing lifecycle
 
-Run the **Provision Ontario OSRM** workflow manually and type `PROVISION-ONTARIO`. The guarded provisioner verifies at least 20 GB free disk and 8 GB combined RAM/swap, downloads the current Geofabrik Ontario extract, verifies its MD5, runs the official MLD extract/partition/customize pipeline, and enables the internal-only `osrm` service. It aborts before downloading when the host does not meet those checks. Once successful, set the GitHub `REQUIRE_REAL_ROUTING` variable to `true`.
+Run the **Provision Ontario OSRM** workflow manually and type `PROVISION-ONTARIO`. The guarded provisioner verifies at least 20 GB free disk and 8 GB combined RAM/swap, downloads the current Geofabrik Ontario extract, verifies its MD5, runs the official MLD extract/partition/customize pipeline, and enables the internal-only `osrm` service. On a smaller root-managed host, it creates a dedicated persistent `/swapfile-roadstar` (minimum 4 GB) only when the memory guard requires it; an existing inactive file is never overwritten. Non-root hosts still stop with an actionable prerequisite error. Once successful, set the GitHub `REQUIRE_REAL_ROUTING` variable to `true`.
 
 Refresh the graph monthly when route freshness matters, or at least quarterly for a demonstration environment, by running the same workflow. The download is replaced only after checksum verification; the marker makes subsequent application deployments enable the OSRM override automatically. Re-run `npm run verify:deployment` after every refresh.
 

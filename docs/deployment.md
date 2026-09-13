@@ -73,7 +73,7 @@ the browser continues to use `/api/routing/route`. When routing is required,
 gateway readiness now checks that OSRM can snap a Toronto coordinate rather
 than treating a configured URL as proof of availability.
 
-For production, use the manually gated `Provision Ontario OSRM` GitHub workflow. It checks disk and RAM/swap before processing and activates the routing override only after all MLD artifacts exist. Refresh monthly for active routing operations or quarterly for a stable judging environment. Four representative Ontario corridors, invalid input, and an outside-graph destination are covered by `verify:deployment`; set `ROADSTAR_REQUIRE_REAL_ROUTING=true` to reject presentation geometry on Ontario corridors.
+For production, use the manually gated `Provision Ontario OSRM` GitHub workflow. It checks disk and RAM/swap before processing and activates the routing override only after all MLD artifacts exist. When run as root on a small host, the guard creates and persists a dedicated `/swapfile-roadstar` of at least 4 GB if combined memory is below 8 GB; it refuses to overwrite an existing inactive file. Refresh monthly for active routing operations or quarterly for a stable judging environment. Four representative Ontario corridors, invalid input, and an outside-graph destination are covered by `verify:deployment`; set `ROADSTAR_REQUIRE_REAL_ROUTING=true` to reject presentation geometry on Ontario corridors.
 
 After the stack or hosted URL is live, verify it together with the expected database version:
 
