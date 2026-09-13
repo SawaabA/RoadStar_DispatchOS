@@ -38,6 +38,7 @@ import { IntelligenceWorkspace } from "../features/intelligence/components/Intel
 import { LoadDocumentsPanel } from "../features/documents/components/LoadDocumentsPanel";
 import { PodCapture } from "../features/documents/components/PodCapture";
 import { useLoadDocuments } from "../features/documents/hooks/useLoadDocuments";
+import { NewLoadForm } from "../features/dispatch/components/NewLoadForm";
 import { documentExceptions } from "../features/documents/lib/documentExceptions";
 import { AnalyticsWorkspace } from "../features/intelligence/components/AnalyticsWorkspace";
 import { IntegrationsWorkspace } from "../features/intelligence/components/IntegrationsWorkspace";
@@ -726,6 +727,7 @@ function DispatchBoard({
 }
 
 function LoadsPage({ ops, documents }: { ops: ReturnType<typeof useDispatchOperations>; documents: ReturnType<typeof useLoadDocuments> }) {
+  const [creatingLoad, setCreatingLoad] = useState(false);
   const [query, setQuery] = useState(""),
     rows = ops.state.loads.filter((l) =>
       `${l.billNumber}${l.customer}${l.origin}${l.destination}`
@@ -743,8 +745,9 @@ function LoadsPage({ ops, documents }: { ops: ReturnType<typeof useDispatchOpera
             view.
           </p>
         </div>
-        <button className="btn primary" disabled title="Load creation is planned for the next phase">+ New load</button>
+        <button className="btn primary" disabled={!ops.canManageDispatch} title={ops.canManageDispatch ? undefined : "Only dispatchers and admins can create loads"} onClick={() => setCreatingLoad(true)}>+ New load</button>
       </div>
+      {creatingLoad && <NewLoadForm onCreate={ops.createLoad} onClose={() => setCreatingLoad(false)} />}
       <LoadDocumentsPanel documents={documents.documents} loads={ops.state.loads} signedIn={Boolean(ops.userEmail)} error={documents.error} />
       <section className="surface table-surface">
         <div className="table-toolbar">

@@ -136,6 +136,42 @@ test("document features ask a signed-out user to sign in instead of failing", as
   await expect(page.getByText("Sign in to attach a proof of delivery.")).toBeVisible();
 });
 
+test("dispatcher creates a load that joins the load board unassigned", async ({ page }) => {
+  await page.getByRole("button", { name: /^Load board/ }).click();
+  await page.getByRole("button", { name: "+ New load" }).click();
+  const form = page.getByRole("dialog", { name: "New load" });
+  await expect(form).toBeVisible();
+
+  await form.getByRole("button", { name: "Create load" }).click();
+  await expect(form.getByText("Enter a bill number.")).toBeVisible();
+  await expect(form.getByLabel("Pickup city")).toHaveAttribute("aria-invalid", "true");
+
+  const results = await new AxeBuilder({ page }).include(".load-form-modal").analyze();
+  // Report each failing element and axe's own explanation, not just the rule name.
+  const serious = results.violations
+    .filter((item) => ["critical", "serious"].includes(item.impact ?? ""))
+    .flatMap((item) => item.nodes.map((node) => `${item.id} ${node.target.join(" ")}: ${node.any[0]?.message ?? node.failureSummary ?? ""}`));
+  expect(serious).toEqual([]);
+
+  await form.getByLabel("Bill number").fill("RS-9001");
+  await form.getByLabel("Customer").fill("Maple Freight Brokerage");
+  await form.getByLabel("Pickup city").selectOption("Guelph");
+  await form.getByLabel("Delivery city").selectOption("Hamilton");
+  await form.getByLabel("Pickup opens").fill("2026-09-14T08:00");
+  await form.getByLabel("Pickup closes").fill("2026-09-14T10:00");
+  await form.getByLabel("Deliver by").fill("2026-09-14T15:00");
+  await form.getByLabel("Equipment").selectOption("Dry Van");
+  await form.getByLabel("Weight (lb)").fill("22000");
+  await form.getByLabel("Pallets").fill("12");
+  await form.getByLabel("Rate (CAD)").fill("1450");
+  await form.getByRole("button", { name: "Create load" }).click();
+
+  await expect(form).toBeHidden();
+  const row = page.locator(".table-row").filter({ hasText: "RS-9001" });
+  await expect(row).toContainText("Guelph, ON");
+  await expect(row).toContainText("Hamilton, ON");
+});
+
 test("historical replay labels opportunity rather than guaranteed savings", async ({ page }) => {
   await page.getByRole("button", { name: /^KPI & replay/ }).click();
   await page.getByRole("button", { name: "Run lane-match replay" }).click();

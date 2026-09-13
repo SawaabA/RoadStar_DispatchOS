@@ -3,6 +3,7 @@ import type {
   Assignment,
   DecisionRecord,
   DispatchCandidate,
+  DispatchLoad,
   DispatchState,
   DriverAssignmentAction,
 } from "../types";
@@ -168,4 +169,13 @@ export function transitionDriverAssignment(
       } satisfies DecisionRecord),
     ].slice(-500),
   };
+}
+
+// Adds a new unassigned load. It refuses a duplicate id or bill number rather
+// than overwrite a load another dispatcher may already be working.
+export function addLoad(current: DispatchState, load: DispatchLoad): DispatchState {
+  const bill = load.billNumber.toLowerCase();
+  if (load.status !== "unassigned") return current;
+  if (current.loads.some((item) => item.id === load.id || item.billNumber.toLowerCase() === bill)) return current;
+  return { ...current, loads: [...current.loads, load] };
 }

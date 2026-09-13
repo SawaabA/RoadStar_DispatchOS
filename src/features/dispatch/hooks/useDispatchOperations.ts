@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createDemoState } from "../data/demoData";
 import { buildMorningPlan, evaluateCandidate } from "../lib/optimizer";
-import { assignCandidate, transitionDriverAssignment, unassignLoad } from "../lib/stateTransitions";
+import { addLoad,
+  assignCandidate, transitionDriverAssignment, unassignLoad } from "../lib/stateTransitions";
 import { isDispatchState } from "../lib/stateValidation";
 import { updateGeofenceVisits } from "../lib/geofencing";
+import { draftToLoad, validateLoadDraft, type LoadDraft, type LoadDraftErrors } from "../lib/loadDraft";
 import type {
   Assignment,
   DecisionRecord,
@@ -276,6 +278,18 @@ export function useDispatchOperations() {
       if (!candidate.feasible || !canManageDispatch) return false;
       setState((current) => assignCandidate(current, candidate, status));
       return true;
+    },
+    [canManageDispatch],
+  );
+
+  const createLoad = useCallback(
+    (draft: LoadDraft): { ok: true; loadId: string } | { ok: false; errors: LoadDraftErrors } => {
+      if (!canManageDispatch) return { ok: false, errors: { billNumber: "Your role cannot create loads." } };
+      const errors = validateLoadDraft(draft, stateRef.current.loads);
+      if (Object.keys(errors).length) return { ok: false, errors };
+      const load = draftToLoad(draft, stateRef.current.loads);
+      setState((current) => addLoad(current, load));
+      return { ok: true, loadId: load.id };
     },
     [canManageDispatch],
   );
@@ -744,6 +758,7 @@ export function useDispatchOperations() {
     sendMagicLink,
     signOut,
     candidateFor,
+    createLoad,
     assign,
     unassign,
     generatePlan,
