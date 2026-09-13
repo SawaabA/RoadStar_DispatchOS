@@ -2,6 +2,7 @@ import { useState } from "react";
 import { BarChart3, Play, TrendingDown, Truck } from "lucide-react";
 import { ROADSTAR_HISTORY, runHistoricalReplay } from "../data/historicalSummary";
 import type { ReturnTypeOfDispatchOperations } from "../viewTypes";
+import { ConstrainedReplayPanel } from "./ConstrainedReplayPanel";
 
 const number = (value: number) => new Intl.NumberFormat("en-CA").format(value);
 
@@ -11,6 +12,7 @@ export function AnalyticsWorkspace({ ops }: { ops: ReturnTypeOfDispatchOperation
   const accepted = (ops.state.decisionLog ?? []).filter((item) => item.outcome === "accepted").length;
   return <div className="page analytics-page fade-in">
     <div className="page-heading"><div><p className="kicker">MEASURED OPERATIONS</p><h1>KPI and historical replay</h1><p>Live workspace performance beside an auditable replay of supplied RoadStar history.</p></div><button className="btn primary" onClick={async () => { const result = runHistoricalReplay(); setScenario(result); const message = await ops.saveP1Record("historical_replay_runs", { source_name: ROADSTAR_HISTORY.source, period_start: ROADSTAR_HISTORY.periodStart, period_end: ROADSTAR_HISTORY.periodEnd, baseline_metrics: ROADSTAR_HISTORY, scenario_metrics: result, assumptions: [result.note] }); setSaveMessage(message ?? "Replay saved to Supabase."); }}><Play />Run lane-match replay</button></div>
+    <ConstrainedReplayPanel ops={ops} />
     {saveMessage && <p className="save-notice" role="status">{saveMessage}</p>}
     <div className="metric-grid">
       <article className="metric-card"><span className="metric-icon teal"><Truck /></span><div><small>ACTIVE TRIPS</small><strong>{ops.metrics.active}</strong><em>{ops.metrics.open} open loads</em></div></article>

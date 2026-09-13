@@ -4,6 +4,8 @@ import type { BackhaulSuggestion, OperationalException, ReplanImpact } from "../
 import type { useRoadIntelligence } from "../hooks/useRoadIntelligence";
 import { DEFAULT_OPTIMIZATION_WEIGHTS } from "../../dispatch/lib/optimizer";
 import { CopilotPanel } from "./CopilotPanel";
+import { FleetReplanPanel } from "./FleetReplanPanel";
+import { TrafficContextPanel } from "./TrafficContextPanel";
 
 type Intelligence = ReturnType<typeof useRoadIntelligence>;
 
@@ -68,9 +70,13 @@ export function IntelligenceWorkspace({ ops, intelligence }: { ops: ReturnTypeOf
       </section>
     </div>
 
+    <FleetReplanPanel ops={ops} incidents={intelligence.traffic.incidents} />
+    <TrafficContextPanel onConstruction={intelligence.setConstruction} />
+    {ops.actionError && <p className="save-notice" role="alert">{ops.actionError}</p>}
     <section className="surface intelligence-panel backhaul-panel">
       <div className="section-head"><div><p className="kicker">NEXT-LOAD ASSISTANT</p><h2>Deadhead and backhaul opportunities</h2></div><small>Suggestions never change dispatch state without approval.</small></div>
       <div className="backhaul-grid">
+        {!intelligence.backhauls.length && <p>No feasible unreserved successors at the current ETAs and HOS clocks.</p>}
         {intelligence.backhauls.slice(0, 6).map((suggestion: BackhaulSuggestion) => {
           const load = ops.state.loads.find((item) => item.id === suggestion.loadId);
           const accepted = decided.has(`${suggestion.id}:accepted`), rejected = decided.has(`${suggestion.id}:rejected`);
@@ -82,6 +88,14 @@ export function IntelligenceWorkspace({ ops, intelligence }: { ops: ReturnTypeOf
           </article>;
         })}
       </div>
+      <h3>Reserved successors</h3>
+      {!(ops.state.backhaulReservations ?? []).length && <p>No backhauls reserved.</p>}
+      {(ops.state.backhaulReservations ?? []).map(reservation => <article className="decision-card" key={reservation.id}>
+        <b>{reservation.loadId} reserved after {reservation.assignmentId}</b>
+        <p>Estimated availability {time(reservation.availableAt)} · completion {time(reservation.projectedEta)}. Dispatch will recheck actual clocks and equipment.</p>
+        <div className="decision-actions"><button className="btn primary" disabled={!ops.canManageDispatch || !ops.state.assignments.some(a => a.id === reservation.assignmentId && a.status === "completed")} onClick={() => ops.updateBackhaulReservation(reservation.id, "dispatch")}>Dispatch reserved load</button>
+          <button className="btn secondary" disabled={!ops.canManageDispatch} onClick={() => ops.updateBackhaulReservation(reservation.id, "cancel")}>Cancel reservation</button></div>
+      </article>)}
     </section>
 
     <section className="surface decision-log">

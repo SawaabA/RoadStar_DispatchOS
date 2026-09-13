@@ -230,4 +230,19 @@ export type DispatchState = {
   acknowledgedExceptionIds?: string[];
   decisionLog?: DecisionRecord[];
   optimizationWeights?: OptimizationWeights;
+  backhaulReservations?: BackhaulReservation[];
+};
+
+// A successor is held separately until its predecessor completes. It cannot be
+// started by the driver or allocated by another planner while reserved.
+export type BackhaulReservation = {
+  id: string;
+  assignmentId: string;
+  loadId: string;
+  driverId: string;
+  truckId: string;
+  trailerId: string;
+  reservedAt: string;
+  availableAt: string;
+  projectedEta: string;
 };

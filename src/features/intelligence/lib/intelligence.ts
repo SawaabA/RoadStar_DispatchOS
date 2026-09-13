@@ -1,6 +1,5 @@
-import distance from "@turf/distance";
-import { point } from "@turf/helpers";
-import { DEFAULT_OPTIMIZATION_WEIGHTS, evaluateCandidate } from "../../dispatch/lib/optimizer";
+import { evaluateCandidate } from "../../dispatch/lib/optimizer";
+import { evaluateBackhaul } from "./backhaul";
 import type { Coordinates, DispatchState } from "../../dispatch/types";
 import type {
   BackhaulSuggestion,
@@ -10,12 +9,7 @@ import type {
   RoadIncident,
 } from "../types";
 
-const kmBetween = (a: Coordinates, b: Coordinates) =>
-  distance(point([a.lng, a.lat]), point([b.lng, b.lat]), {
-    units: "kilometers",
-  });
-
-function distanceToSegmentKm(
+export function distanceToSegmentKm(
   target: Coordinates,
   start: Coordinates,
   end: Coordinates,
@@ -115,7 +109,7 @@ export function deriveExceptions(
     const candidates = state.drivers.flatMap((driver) => {
       const trailer = state.trailers.find((item) => item.id === driver.trailerId);
       const truck = state.trucks.find((item) => item.id === driver.truckId);
-      return trailer ? [evaluateCandidate(load, driver, trailer, truck)] : [];
+      return trailer && truck ? [evaluateCandidate(load, driver, trailer, { trucks: state.trucks, assignments: state.assignments, reservations: state.backhaulReservations })] : [];
     });
     if (candidates.some((candidate) => candidate.feasible)) continue;
     const reasons = [...new Set(candidates.flatMap((candidate) => candidate.reasons.map((reason) => reason.label)))];
@@ -186,60 +180,18 @@ export function deriveExceptions(
   );
 }
 
-export function buildBackhaulSuggestions(state: DispatchState): BackhaulSuggestion[] {
-  const terminal = state.facilities[0]?.point;
-  if (!terminal) return [];
-  const suggestions: BackhaulSuggestion[] = [];
-  for (const assignment of state.assignments.filter((item) => item.status !== "completed")) {
-    const currentLoad = state.loads.find((item) => item.id === assignment.loadId);
-    const driver = state.drivers.find((item) => item.id === assignment.driverId);
-    const truck = state.trucks.find((item) => item.id === assignment.truckId);
-    const trailer = state.trailers.find((item) => item.id === assignment.trailerId);
-    if (!currentLoad || !driver || !truck || !trailer) continue;
-    const futureHours = Math.max(0.25, (1 - assignment.progress) * 2.5);
-    const availableAt = Date.now() + futureHours * 3_600_000;
-    for (const load of state.loads.filter((item) => item.status === "unassigned")) {
-      const repositionKm = kmBetween(currentLoad.destinationPoint, load.originPoint);
-      const baselineEmptyKm = kmBetween(currentLoad.destinationPoint, terminal);
-      const futureDriver = {
-        ...driver,
-        status: "available" as const,
-        // The candidate is evaluated at availableAt, after this trip finishes.
-        // Do not carry the active trip's display-only time into that future state.
-        nextAvailable: "Now",
-        point: currentLoad.destinationPoint,
-        drivingHoursRemaining: Math.max(0, driver.drivingHoursRemaining - futureHours),
-        onDutyHoursRemaining: Math.max(0, driver.onDutyHoursRemaining - futureHours),
-        cycleHoursRemaining: Math.max(0, driver.cycleHoursRemaining - futureHours),
-      };
-      const candidate = evaluateCandidate(
-        load,
-        futureDriver,
-        { ...trailer, status: "available" },
-        { ...truck, status: "available" },
-        availableAt,
-        state.optimizationWeights ?? DEFAULT_OPTIMIZATION_WEIGHTS,
-        Math.max(0, 100 - repositionKm),
-      );
-      if (!candidate.feasible) continue;
-      const avoidedEmptyKm = Math.max(0, baselineEmptyKm - repositionKm);
-      suggestions.push({
-        id: `BACKHAUL-${assignment.id}-${load.id}`,
-        assignmentId: assignment.id,
-        loadId: load.id,
-        driverId: driver.id,
-        repositionKm,
-        baselineEmptyKm,
-        avoidedEmptyKm,
-        projectedHosMargin: candidate.hosRemainingAfter,
-        score: Math.min(100, Math.round(candidate.score + Math.min(15, avoidedEmptyKm / 5))),
-        explanation: `${load.billNumber} begins ${Math.round(repositionKm)} km from ${currentLoad.destination}; pairing it avoids up to ${Math.round(avoidedEmptyKm)} km versus returning to ${state.facilities[0].name}.`,
-      });
-    }
-  }
-  return suggestions.sort((a, b) => b.score - a.score);
+export function buildBackhaulSuggestions(state: DispatchState, now = Date.now()): BackhaulSuggestion[] {
+  return state.assignments.flatMap(assignment => state.loads.filter(load => load.status === "unassigned").flatMap(load => {
+    const result = evaluateBackhaul(state, assignment.id, load.id, now);
+    if (!result) return [];
+    return [{ id: `BACKHAUL-${assignment.id}-${load.id}`, assignmentId: assignment.id, loadId: load.id,
+      driverId: assignment.driverId, repositionKm: result.candidate.deadheadKm,
+      baselineEmptyKm: result.baselineEmptyKm, avoidedEmptyKm: result.avoidedEmptyKm,
+      projectedHosMargin: result.candidate.hosRemainingAfter, score: result.candidate.score,
+      explanation: `${load.billNumber}: ${Math.round(result.candidate.deadheadKm)} km reposition after the current trip; up to ${Math.round(result.avoidedEmptyKm)} km avoided versus returning to the terminal. Estimated availability ${new Date(result.availableAt).toLocaleTimeString("en-CA", { hour: "2-digit", minute: "2-digit" })}.`,
+    }];
+  })).sort((a, b) => b.score - a.score);
 }
-
 export function providerStatuses(options: {
   cloud: boolean;
   trafficLive: boolean;

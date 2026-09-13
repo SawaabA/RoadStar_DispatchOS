@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { normalizeTmsLoad } from "./tms-contract.mjs";
+import { getTrafficContext } from "./traffic-context.mjs";
 import { aiMetrics, aiReadiness, AiError, authenticate, checkRateLimit, readJson, requireRole } from "./ai.mjs";
 import { handleCopilot } from "./copilot.mjs";
 import { handleExtract } from "./extract.mjs";
@@ -227,6 +228,10 @@ const server = createServer(async (request, response) => {
       log("error", "traffic_failure", { requestId, message: error instanceof Error ? error.message : "Unknown failure" });
       writeJson(response, 503, { error: "Traffic provider unavailable", ...(production ? {} : { detail: error instanceof Error ? error.message : "Unknown failure" }) }, requestId);
     }
+    return;
+  }
+  if (url.pathname === "/api/traffic/context") {
+    writeJson(response, 200, await getTrafficContext(), requestId, { "Cache-Control": "public, max-age=60" });
     return;
   }
   if (url.pathname === "/api/routing/route") {

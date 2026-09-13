@@ -1,4 +1,4 @@
-import { evaluateCandidate } from "./optimizer";
+import { evaluateCandidate, type PlanningContext } from "./optimizer";
 import type {
   Assignment,
   DecisionRecord,
@@ -13,6 +13,7 @@ export function assignCandidate(
   candidate: DispatchCandidate,
   status: Assignment["status"] = "dispatched",
   now = Date.now(),
+  context: PlanningContext = {},
 ): DispatchState {
   if (!candidate.feasible) return current;
 
@@ -33,7 +34,7 @@ export function assignCandidate(
   )
     return current;
 
-  const freshCandidate = evaluateCandidate(load, driver, trailer, { now, trucks: current.trucks, assignments: current.assignments, weights: current.optimizationWeights });
+  const freshCandidate = evaluateCandidate(load, driver, trailer, { ...context, now, trucks: current.trucks, assignments: current.assignments, reservations: current.backhaulReservations, weights: current.optimizationWeights });
   if (!freshCandidate.feasible) return current;
 
   const assignedAt = new Date(now).toISOString();
@@ -86,10 +87,14 @@ export function unassignLoad(
   )
     return current;
 
+  // Release a queued successor when its predecessor is withdrawn.
+  const reservations = (current.backhaulReservations ?? []).filter(item => item.assignmentId === assignment.id);
+  const released = new Set(reservations.map(item => item.loadId));
+
   return {
     ...current,
     loads: current.loads.map((item) =>
-      item.id === loadId ? { ...item, status: "unassigned" } : item,
+      item.id === loadId || released.has(item.id) ? { ...item, status: "unassigned" } : item,
     ),
     drivers: current.drivers.map((item) =>
       item.id === assignment.driverId ? { ...item, status: "available" } : item,
@@ -103,6 +108,7 @@ export function unassignLoad(
         : item,
     ),
     assignments: current.assignments.filter((item) => item.id !== assignment.id),
+    backhaulReservations: (current.backhaulReservations ?? []).filter(item => item.assignmentId !== assignment.id),
   };
 }
 

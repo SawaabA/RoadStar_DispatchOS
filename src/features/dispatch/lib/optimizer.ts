@@ -1,4 +1,4 @@
-import type { Assignment, Coordinates, DispatchCandidate, DispatchLoad, Driver, FeasibilityReason, OptimizationWeights, PlanProposal, TrailerAsset, TruckAsset } from '../types';
+import type { Assignment, BackhaulReservation, Coordinates, DispatchCandidate, DispatchLoad, Driver, FeasibilityReason, OptimizationWeights, PlanProposal, TrailerAsset, TruckAsset } from '../types';
 
 // Planning estimates, not road routing or a certified HOS calculation.
 export const PLANNING_ASSUMPTIONS = {
@@ -11,13 +11,14 @@ export const PLANNING_ASSUMPTIONS = {
 } as const;
 
 export const DEFAULT_OPTIMIZATION_WEIGHTS: OptimizationWeights = { deadhead: 40, onTime: 30, hosBuffer: 20, futurePosition: 10 };
-type Context = { now?: number; trucks?: TruckAsset[]; assignments?: Assignment[]; weights?: OptimizationWeights; futurePositionScore?: number };
+export type PlanningContext = { now?: number; trucks?: TruckAsset[]; assignments?: Assignment[]; reservations?: BackhaulReservation[]; weights?: OptimizationWeights; futurePositionScore?: number; routeImpact?: (load: DispatchLoad, driver: Driver) => { blocked: boolean; delayMinutes: number } };
+type Context = PlanningContext;
 const round = (value: number) => Math.round(value * 100) / 100;
 const validPoint = (p: Coordinates) => Number.isFinite(p.lat) && Number.isFinite(p.lng) && Math.abs(p.lat) <= 90 && Math.abs(p.lng) <= 180;
 const nonnegative = (n: number) => Number.isFinite(n) && n >= 0;
 const compareId = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
 
-function roadKm(a: Coordinates, b: Coordinates): number {
+export function roadKm(a: Coordinates, b: Coordinates): number {
   const rad = Math.PI / 180;
   const h = Math.sin((b.lat - a.lat) * rad / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin((b.lng - a.lng) * rad / 2) ** 2;
   return 6371.0088 * 2 * Math.asin(Math.sqrt(Math.min(1, Math.max(0, h)))) * PLANNING_ASSUMPTIONS.roadDistanceFactor;
@@ -40,6 +41,10 @@ export function evaluateCandidate(load: DispatchLoad, driver: Driver, trailer: T
   if (context.assignments?.some(a => a.status !== 'completed' && (a.loadId === load.id || a.driverId === driver.id || a.truckId === driver.truckId || a.trailerId === trailer.id))) {
     reject('status', 'Load or unit already has an active assignment.');
   }
+  if (context.reservations?.some(a => a.loadId === load.id || a.driverId === driver.id || a.truckId === driver.truckId || a.trailerId === trailer.id)) reject('status', 'Load or unit is reserved for a backhaul.');
+  const impact = context.routeImpact?.(load, driver);
+  if (impact?.blocked) reject('pickup', 'A reported full closure intersects the estimated route; a verified alternative is required.');
+  const delayHours = Math.max(0, impact?.delayMinutes ?? 0) / 60;
   if (load.equipment !== trailer.type || (load.temperatureControlled && trailer.type !== 'Reefer')) reject('equipment', `Requires ${load.equipment}${load.temperatureControlled ? ' with refrigeration' : ''}; trailer equipment is ${trailer.type}.`);
   if (!nonnegative(load.weightLbs) || !Number.isFinite(trailer.capacityLbs) || trailer.capacityLbs <= 0 || load.weightLbs > trailer.capacityLbs) reject('weight', 'Load weight is invalid or exceeds trailer capacity.');
 
@@ -53,8 +58,8 @@ export function evaluateCandidate(load: DispatchLoad, driver: Driver, trailer: T
   const availableAt = driver.nextAvailable.trim().toLowerCase() === 'now' ? now : Date.parse(driver.nextAvailable);
   if (!Number.isFinite(availableAt)) reject('status', 'Driver availability must be Now or a dated timestamp.');
   const startDelay = Number.isFinite(availableAt) && Number.isFinite(now) ? Math.max(0, (availableAt - now) / 3_600_000) : 0;
-  const drivingHours = (deadheadKm + tripKm) / PLANNING_ASSUMPTIONS.averageSpeedKph;
-  const arrivalHours = startDelay + deadheadKm / PLANNING_ASSUMPTIONS.averageSpeedKph;
+  const drivingHours = (deadheadKm + tripKm) / PLANNING_ASSUMPTIONS.averageSpeedKph + delayHours;
+  const arrivalHours = startDelay + deadheadKm / PLANNING_ASSUMPTIONS.averageSpeedKph + delayHours;
   const pickupHours = datesValid ? Math.max(arrivalHours, (pickupStart - now) / 3_600_000) : arrivalHours;
   const waitingHours = pickupHours - arrivalHours;
   const workHours = drivingHours + waitingHours + PLANNING_ASSUMPTIONS.pickupServiceHours + PLANNING_ASSUMPTIONS.deliveryServiceHours;

@@ -20,6 +20,15 @@ export function isDispatchState(value: unknown): value is DispatchState {
   const trailerIds = new Set(candidate.trailers.map((item) => item?.id));
   const facilityIds = new Set(candidate.facilities.map((item) => item?.id));
   const weights = candidate.optimizationWeights;
+  const reservations = candidate.backhaulReservations;
+  const validReservations = reservations === undefined || (Array.isArray(reservations) && reservations.length <= candidate.loads.length &&
+    ["id", "loadId", "driverId", "truckId", "trailerId", "assignmentId"].every(key => new Set(reservations.map(r => r?.[key as keyof typeof r])).size === reservations.length) &&
+    reservations.every(r => r && typeof r.id === "string" && loadIds.has(r.loadId) && driverIds.has(r.driverId) && truckIds.has(r.truckId) && trailerIds.has(r.trailerId) &&
+      [r.reservedAt, r.availableAt, r.projectedEta].every(t => typeof t === "string" && Number.isFinite(Date.parse(t))) &&
+      Date.parse(r.availableAt) <= Date.parse(r.projectedEta) &&
+      candidate.loads!.some(l => l.id === r.loadId && l.status === "assigned") &&
+      !candidate.assignments!.some(a => a.loadId === r.loadId) &&
+      candidate.assignments!.some(a => a.id === r.assignmentId && a.driverId === r.driverId && a.truckId === r.truckId && a.trailerId === r.trailerId)));
   const validWeights = !weights || [weights.deadhead, weights.onTime, weights.hosBuffer, weights.futurePosition]
     .every((item) => Number.isFinite(item) && item >= 0 && item <= 100);
   const validAcknowledgements = !candidate.acknowledgedExceptionIds || (
@@ -35,7 +44,7 @@ export function isDispatchState(value: unknown): value is DispatchState {
   );
 
   return (
-    validWeights && validAcknowledgements && validDecisions &&
+    validWeights && validAcknowledgements && validDecisions && validReservations &&
     candidate.loads.every((item) => item && typeof item.id === "string" && (
       !item.cargoItems || (Array.isArray(item.cargoItems) && item.cargoItems.every((cargo) =>
         cargo && typeof cargo.id === "string" && typeof cargo.label === "string" &&

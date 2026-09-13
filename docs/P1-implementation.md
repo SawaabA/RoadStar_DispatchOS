@@ -29,6 +29,17 @@ P1 turns the P0 operating picture into an approval-first decision system. Recomm
 
 ## Honest boundaries
 
+## P1 completion update — 13 September 2026
+
+The current branch adds the next implementation layer for the previously partial P1 work:
+
+- `backhaul.ts` now creates tenant snapshot reservations, protects reserved loads from duplicate planning, cancels reservations safely, and dispatches successors only after predecessor completion plus a fresh feasibility check.
+- `replanning.ts` produces a closure-aware fleet proposal, protects accepted/in-transit/reserved work, records a state fingerprint, and applies proposals atomically only while fresh.
+- `replay.ts` validates a bounded timestamped dataset and runs an event-driven constrained replay carrying driver clocks and unit availability forward. `ConstrainedReplayPanel` runs it in a worker, compares baseline and modeled metrics, and can save results through the existing P1 RPC.
+- `traffic-context.mjs` and `TrafficContextPanel` add Ontario 511 construction, camera and road-condition resources with caching, safe HTTPS camera links, stale-data messaging and visibility-aware refresh. The provider documents these as separate REST resources and throttles requests, so the gateway coalesces and caches calls.
+
+These additions complete local product behavior and regression coverage. Production TMS/ELD credentials, routing configuration, SPUR credentials, and authenticated multiuser verification remain deployment inputs.
+
 - Ontario 511 supplies incidents. An internal-only Ontario OSRM service, guarded preprocessing workflow and strict route verification are included; production remains on labelled presentation fallback until the graph is provisioned and `REQUIRE_REAL_ROUTING` is enabled.
 - Backhaul and replay kilometres are opportunities, not guaranteed savings.
 - HOS is planning guidance, not a certified ELD. Demo telemetry is explicitly labelled; a real vendor adapter remains a deployment input.

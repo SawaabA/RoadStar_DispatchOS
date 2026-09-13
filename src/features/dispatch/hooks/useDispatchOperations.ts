@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createDemoState } from "../data/demoData";
 import { buildMorningPlan, evaluateCandidate } from "../lib/optimizer";
 import { detectExceptions } from "../lib/exceptions";
+import { reserveBackhaul, cancelBackhaul, dispatchBackhaul } from "../../intelligence/lib/backhaul";
+import { applyFleetReplan, type FleetReplan } from "../../intelligence/lib/replanning";
 import { addLoad, assignCandidate, transitionDriverAssignment, unassignLoad } from "../lib/stateTransitions";
 import { isDispatchState } from "../lib/stateValidation";
 import { updateGeofenceVisits } from "../lib/geofencing";
@@ -281,7 +283,7 @@ export function useDispatchOperations() {
         (item) => item.id === driver?.trailerId,
       );
       return load && driver && trailer
-        ? evaluateCandidate(load, driver, trailer, { trucks: state.trucks, assignments: state.assignments, weights: state.optimizationWeights })
+        ? evaluateCandidate(load, driver, trailer, { trucks: state.trucks, assignments: state.assignments, reservations: state.backhaulReservations, weights: state.optimizationWeights })
         : null;
     },
     [state],
@@ -322,7 +324,7 @@ export function useDispatchOperations() {
   const generatePlan = useCallback(
     () => {
       if (!canManageDispatch) return;
-      setProposal(buildMorningPlan(state.loads, state.drivers, state.trailers, { trucks: state.trucks, assignments: state.assignments, weights: state.optimizationWeights }));
+      setProposal(buildMorningPlan(state.loads, state.drivers, state.trailers, { trucks: state.trucks, assignments: state.assignments, reservations: state.backhaulReservations, weights: state.optimizationWeights }));
     },
     [state, canManageDispatch],
   );
@@ -377,11 +379,36 @@ export function useDispatchOperations() {
     }));
   }, [canManageDispatch]);
 
-  const resolveBackhaul = useCallback((suggestion: BackhaulSuggestion, outcome: "accepted" | "rejected") => recordDecision({
-    id: `${suggestion.id}:${outcome}`, kind: "backhaul", outcome,
-    createdAt: new Date().toISOString(),
-    summary: `${outcome === "accepted" ? "Reserved" : "Dismissed"} ${suggestion.loadId} after ${suggestion.assignmentId} (${Math.round(suggestion.avoidedEmptyKm)} km opportunity)`,
-  }), [recordDecision]);
+  const resolveBackhaul = useCallback((suggestion: BackhaulSuggestion, outcome: "accepted" | "rejected") => {
+    if (!canManageDispatch) return;
+    const current = stateRef.current;
+    const next = outcome === "accepted" ? reserveBackhaul(current, suggestion.assignmentId, suggestion.loadId) : current;
+    if (outcome === "accepted" && next === current) { setActionError("This backhaul is no longer feasible or is already reserved. Refresh the suggestions."); return; }
+    const updated: DispatchState = { ...next, decisionLog: [...(next.decisionLog ?? []), {
+      id: `${suggestion.id}:${Date.now()}:${outcome}`, kind: "backhaul", outcome,
+      createdAt: new Date().toISOString(), summary: `${outcome === "accepted" ? "Reserved" : "Dismissed"} ${suggestion.loadId} after ${suggestion.assignmentId}`,
+    }] };
+    stateRef.current = updated; setState(updated); setActionError(null);
+  }, [canManageDispatch]);
+
+  const updateBackhaulReservation = useCallback((id: string, action: "cancel" | "dispatch") => {
+    if (!canManageDispatch) return;
+    const current = stateRef.current;
+    const next = action === "cancel" ? cancelBackhaul(current, id) : dispatchBackhaul(current, id);
+    if (next === current) { setActionError("The previous trip must complete and current equipment, availability, appointments and HOS must still be feasible."); return; }
+    const updated: DispatchState = { ...next, decisionLog: [...(next.decisionLog ?? []), {
+      id: `${id}:${action}:${Date.now()}`, kind: "backhaul", outcome: action === "cancel" ? "rejected" : "accepted",
+      createdAt: new Date().toISOString(), summary: `${action === "cancel" ? "Cancelled reservation" : "Dispatched reserved successor"}: ${id}`,
+    }] };
+    stateRef.current = updated; setState(updated); setActionError(null);
+  }, [canManageDispatch]);
+
+  const applyReplanProposal = useCallback((proposal: FleetReplan) => {
+    if (!canManageDispatch) return false;
+    const current = stateRef.current, next = applyFleetReplan(current, proposal);
+    if (next === current) { setActionError("Fleet state changed or the proposal expired. Generate a fresh re-plan before applying it."); return false; }
+    stateRef.current = next; setState(next); setActionError(null); return true;
+  }, [canManageDispatch]);
 
   const setOptimizationWeights = useCallback((optimizationWeights: OptimizationWeights) => {
     if (!canManageDispatch) return;
@@ -867,6 +894,8 @@ export function useDispatchOperations() {
     acknowledgeException,
     resolveReplan,
     resolveBackhaul,
+    updateBackhaulReservation,
+    applyReplanProposal,
     recordDecision,
     setOptimizationWeights,
     reloadCloud,
