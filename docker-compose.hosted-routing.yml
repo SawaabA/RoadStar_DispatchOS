@@ -1,0 +1,9 @@
+# Fast demo routing override. This uses the public OSRM endpoint and requires no
+# local graph preprocessing. Replace it with docker-compose.osrm.yml when the
+# self-hosted Ontario graph is ready.
+services:
+  integrations:
+    environment:
+      ROUTING_PROVIDER: Hosted OSRM demo
+      ROUTING_BASE_URL: https://router.project-osrm.org
+      REQUIRE_ROUTING: "true"
