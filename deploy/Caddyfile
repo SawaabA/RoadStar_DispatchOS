@@ -3,12 +3,29 @@
 # Caddy obtains and renews a Let's Encrypt certificate automatically, which
 # requires roadstardispatch.xyz to already resolve to this host's public IP.
 # Until DNS is in place, see deploy/README.md for the local-only variant.
+#
+# This file is not copied by the deploy workflow. After changing it, copy it to
+# /etc/caddy/Caddyfile on the host and run `sudo systemctl reload caddy`.
 
+# The www redirect only works once www.roadstardispatch.xyz has a DNS record
+# (a CNAME to roadstardispatch.xyz, or an A record to this host). Without one,
+# Caddy cannot obtain a certificate for it.
 www.roadstardispatch.xyz {
 	redir https://roadstardispatch.xyz{uri} permanent
 }
 
 roadstardispatch.xyz {
+	# The web gateway also sends this header; setting it here keeps it in place
+	# even if a response comes from Caddy itself.
+	header Strict-Transport-Security "max-age=31536000"
+
+	# Monitoring counters are for the host only. The gateway refuses proxied
+	# requests too; this stops them at the edge.
+	@metrics path /metrics
+	handle @metrics {
+		respond 404
+	}
+
 	# The telemetry stream is Server-Sent Events. It must never be compressed
 	# or buffered, or the live map stops updating while the connection is held
 	# open. Handled before the general route so `encode` cannot apply to it.

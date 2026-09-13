@@ -1,5 +1,5 @@
 import { createReadStream, existsSync, statSync } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { dirname, extname, join, normalize, relative, resolve } from "node:path";
 import { Readable } from "node:stream";
@@ -17,6 +17,8 @@ const targets = {
 // served as application/octet-stream is refused. The pdf.js worker is .mjs.
 const mime = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon" };
 const securityHeaders = {
+  // Browsers only honour this over HTTPS, which the production proxy provides.
+  "Strict-Transport-Security": "max-age=31536000",
   "X-Content-Type-Options": "nosniff",
   "Referrer-Policy": "strict-origin-when-cross-origin",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
@@ -24,6 +26,20 @@ const securityHeaders = {
   "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://tiles.openfreemap.org https://server.arcgisonline.com https://fonts.googleapis.com; worker-src 'self' blob:; font-src 'self' data: https://fonts.gstatic.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
 };
 const metrics = { requests: 0, errors: 0, upstreamErrors: 0 };
+const metricsToken = process.env.METRICS_TOKEN || "";
+
+// /metrics is for the host and internal monitoring. Requests relayed by the
+// public reverse proxy carry X-Forwarded-For, which a client cannot remove, and
+// are refused unless they present METRICS_TOKEN.
+function metricsAllowed(request) {
+  const header = String(request.headers.authorization || "");
+  if (metricsToken && header.startsWith("Bearer ")) {
+    const given = Buffer.from(header.slice(7));
+    const expected = Buffer.from(metricsToken);
+    if (given.length === expected.length && timingSafeEqual(given, expected)) return true;
+  }
+  return !request.headers["x-forwarded-for"];
+}
 
 function log(level, event, context = {}) {
   console[level](JSON.stringify({ timestamp: new Date().toISOString(), service: "web-gateway", event, ...context }));
@@ -92,6 +108,11 @@ const server = createServer(async (request, response) => {
     return;
   }
   if (request.url === "/metrics") {
+    if (!metricsAllowed(request)) {
+      response.writeHead(404, { ...securityHeaders, "Content-Type": "application/json", "X-Request-ID": requestId });
+      response.end('{"error":"Not found"}');
+      return;
+    }
     const body = Object.entries(metrics).map(([name, value]) => `roadstar_web_${name}_total ${value}`).join("\n") + "\n";
     response.writeHead(200, { ...securityHeaders, "Content-Type": "text/plain; version=0.0.4", "X-Request-ID": requestId });
     response.end(body);

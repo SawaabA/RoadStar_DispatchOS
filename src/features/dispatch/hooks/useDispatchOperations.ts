@@ -4,6 +4,7 @@ import { buildMorningPlan, evaluateCandidate } from "../lib/optimizer";
 import { addLoad, assignCandidate, transitionDriverAssignment, unassignLoad } from "../lib/stateTransitions";
 import { isDispatchState } from "../lib/stateValidation";
 import { updateGeofenceVisits } from "../lib/geofencing";
+import { accountIdleTime } from "../lib/dutyAccounting";
 import { validateTelemetryEvent } from "../lib/telemetryValidation";
 import { draftToLoad, validateLoadDraft, type LoadDraft, type LoadDraftErrors } from "../lib/loadDraft";
 import type {
@@ -479,7 +480,10 @@ export function useDispatchOperations() {
       externalTelemetryAt.current.set(telemetry.truckId, Date.now());
       setState((current) => {
         const assignment = current.assignments.find((item) => item.truckId === telemetry.truckId && item.status === "in_transit");
-        if (!assignment) return current;
+        // A truck that is not on a trip still waits at facilities and keeps its
+        // driver on duty. The simulator moves its vehicles independently of
+        // dispatch state, so a parked truck keeps its known position.
+        if (!assignment) return accountIdleTime(current, { minutes: 2, onlyTruckIds: new Set([telemetry.truckId]) });
         const nextStatus: Assignment["status"] =
           telemetry.progress >= 1 ? "completed" : "in_transit";
         let visits = current.visits.map((visit) =>
@@ -574,7 +578,11 @@ export function useDispatchOperations() {
       () =>
         setState((current) => {
           let visits = [...current.visits];
-          const fallbackTruckIds = new Set<string>();
+          const liveTruckIds = new Set(
+            current.trucks
+              .filter((truck) => Date.now() - (externalTelemetryAt.current.get(truck.id) || 0) < 2500)
+              .map((truck) => truck.id),
+          );
           const assignments = current.assignments.map((assignment) => {
             const externalIsFresh = Date.now() - (externalTelemetryAt.current.get(assignment.truckId) || 0) < 2500;
             if (externalIsFresh) return assignment;
@@ -582,7 +590,6 @@ export function useDispatchOperations() {
               assignment.status !== "in_transit"
             )
               return assignment;
-            fallbackTruckIds.add(assignment.truckId);
             const load = current.loads.find(
               (item) => item.id === assignment.loadId,
             );
@@ -626,17 +633,12 @@ export function useDispatchOperations() {
               ).toISOString(),
             };
           });
-          visits = visits.map((v) =>
-            v.departedAt || !fallbackTruckIds.has(v.truckId)
-              ? v
-              : { ...v, dwellMinutes: v.dwellMinutes + 2 },
-          );
           const completed = new Set(
             assignments
               .filter((a) => a.status === "completed")
               .map((a) => a.loadId),
           );
-          return {
+          const next: DispatchState = {
             ...current,
             assignments,
             visits,
@@ -706,6 +708,10 @@ export function useDispatchOperations() {
                 : trailer;
             }),
           };
+          // Dwell for every open facility visit and on-duty time for working
+          // drivers who are not moving. Trucks on live telemetry are accounted
+          // by the stream handler instead.
+          return accountIdleTime(next, { minutes: 2, skipTruckIds: liveTruckIds });
         }),
       1000,
     );
